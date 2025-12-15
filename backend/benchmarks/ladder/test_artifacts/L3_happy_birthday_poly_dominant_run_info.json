@@ -1,0 +1,9 @@
+{
+  "detectors_ran": ["yin", "crepe"],
+  "config": {
+    "stage_a": {},
+    "stage_b": {},
+    "stage_c": {},
+    "stage_d": {}
+  }
+}

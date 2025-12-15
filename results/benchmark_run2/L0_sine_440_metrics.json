@@ -1,0 +1,8 @@
+{
+  "level": "L0",
+  "name": "sine_440",
+  "note_f1": 1.0,
+  "onset_mae_ms": 0.0,
+  "predicted_count": 1,
+  "gt_count": 1
+}

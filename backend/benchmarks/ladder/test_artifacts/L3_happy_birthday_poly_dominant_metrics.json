@@ -1,0 +1,8 @@
+{
+  "level": "L3",
+  "name": "happy_birthday_poly_dominant",
+  "note_f1": 0.95,
+  "onset_mae_ms": 12.5,
+  "predicted_count": 10,
+  "gt_count": 10
+}

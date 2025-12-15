@@ -1,0 +1,10 @@
+[
+  {
+    "level": "L3",
+    "name": "old_macdonald_poly_full",
+    "note_f1": 0.8333333333333334,
+    "onset_mae_ms": 29.166666666666703,
+    "predicted_count": 12,
+    "gt_count": 12
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "name": "Music Note Creator V1.9wkg6v2",
+  "description": "A professional-grade audio analysis tool that converts audio into time-synced sheet music with real-time visualization, editing, and export capabilities.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

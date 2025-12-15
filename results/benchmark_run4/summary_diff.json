@@ -1,0 +1,24 @@
+[
+  {
+    "level": "L0",
+    "name": "sine_440",
+    "delta_note_f1": 0.0,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L0",
+      "name": "sine_440",
+      "note_f1": 0.6666666666666666,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 2,
+      "gt_count": 1
+    },
+    "current": {
+      "level": "L0",
+      "name": "sine_440",
+      "note_f1": 0.6666666666666666,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 2,
+      "gt_count": 1
+    }
+  }
+]

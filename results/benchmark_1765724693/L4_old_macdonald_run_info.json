@@ -1,0 +1,146 @@
+{
+  "config": {
+    "stage_a": {
+      "target_sample_rate": 44100,
+      "channel_handling": "mono_sum",
+      "dc_offset_removal": true,
+      "transient_pre_emphasis": {
+        "enabled": true,
+        "alpha": 0.97
+      },
+      "high_pass_filter_cutoff": {
+        "value": 55.0
+      },
+      "high_pass_filter_order": {
+        "value": 4
+      },
+      "silence_trimming": {
+        "enabled": true,
+        "top_db": 50
+      },
+      "loudness_normalization": {
+        "enabled": true,
+        "target_lufs": -23.0
+      },
+      "peak_limiter": {
+        "enabled": false,
+        "mode": "soft",
+        "ceiling_db": -1.0
+      },
+      "noise_floor_estimation": {
+        "percentile": 30
+      },
+      "bpm_detection": {
+        "enabled": true
+      }
+    },
+    "stage_b": {
+      "separation": {
+        "enabled": false,
+        "model": "htdemucs",
+        "overlap": 0.25,
+        "shifts": 1,
+        "harmonic_masking": {
+          "enabled": false,
+          "mask_width": 0.025,
+          "n_harmonics": 8
+        }
+      },
+      "confidence_voicing_threshold": 0.65,
+      "confidence_priority_floor": 0.5,
+      "pitch_disagreement_cents": 45.0,
+      "ensemble_weights": {
+        "swiftf0": 0.5,
+        "sacf": 0.3,
+        "cqt": 0.2,
+        "yin": 0.3,
+        "rmvpe": 0.5,
+        "crepe": 0.5
+      },
+      "polyphonic_peeling": {
+        "max_layers": 8,
+        "mask_width": 0.03,
+        "force_on_mix": true
+      },
+      "detectors": {
+        "rmvpe": {
+          "enabled": false,
+          "fmin": 50.0,
+          "fmax": 1200.0,
+          "hop_length": 160,
+          "silence_threshold": 0.04
+        },
+        "crepe": {
+          "enabled": false,
+          "model_capacity": "full",
+          "fmin": 190.0,
+          "fmax": 3500.0,
+          "use_viterbi": false
+        },
+        "swiftf0": {
+          "enabled": true
+        },
+        "yin": {
+          "enabled": true
+        },
+        "sacf": {
+          "enabled": true
+        },
+        "cqt": {
+          "enabled": true
+        }
+      }
+    },
+    "stage_c": {
+      "segmentation_method": {
+        "method": "hmm",
+        "states": [
+          "attack",
+          "sustain",
+          "silence"
+        ]
+      },
+      "min_note_duration_ms": 30.0,
+      "min_note_duration_ms_poly": 60.0,
+      "frame_stability": {
+        "stable_frames_required": 2
+      },
+      "pitch_tolerance_cents": 50.0,
+      "gap_filling": {
+        "max_gap_ms": 100.0
+      },
+      "polyphonic_confidence": {
+        "melody": 0.2,
+        "accompaniment": 0.45
+      },
+      "velocity_map": {
+        "min_db": -15.0,
+        "max_db": -4.0,
+        "min_vel": 20.0,
+        "max_vel": 105.0
+      },
+      "polyphony_filter": {
+        "mode": "skyline_top_voice"
+      }
+    },
+    "stage_d": {
+      "divisions_per_quarter": 24,
+      "staff_split_point": {
+        "pitch": 60
+      },
+      "staccato_marking": {
+        "threshold_beats": 0.25
+      },
+      "glissando_threshold_general": {
+        "enabled": false,
+        "min_semitones": 2.0,
+        "max_time_ms": 500.0
+      },
+      "glissando_handling_piano": {
+        "enabled": false
+      }
+    },
+    "instrument_profiles": []
+  },
+  "detectors_ran": []
+}

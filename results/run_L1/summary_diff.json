@@ -1,0 +1,24 @@
+[
+  {
+    "level": "L1",
+    "name": "scale_c_maj",
+    "delta_note_f1": 0.33333333333333337,
+    "delta_onset_mae_ms": -13.197278911564664,
+    "previous": {
+      "level": "L1",
+      "name": "scale_c_maj",
+      "note_f1": 0.6666666666666666,
+      "onset_mae_ms": 13.197278911564664,
+      "predicted_count": 16,
+      "gt_count": 8
+    },
+    "current": {
+      "level": "L1",
+      "name": "scale_c_maj",
+      "note_f1": 1.0,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 8,
+      "gt_count": 8
+    }
+  }
+]

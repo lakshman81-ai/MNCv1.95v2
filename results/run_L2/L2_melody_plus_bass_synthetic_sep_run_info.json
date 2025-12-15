@@ -1,0 +1,206 @@
+{
+  "detectors_ran": [
+    "swiftf0",
+    "yin",
+    "sacf",
+    "cqt"
+  ],
+  "diagnostics": {
+    "polyphonic_context": true,
+    "detectors_initialized": [
+      "swiftf0",
+      "yin",
+      "sacf",
+      "cqt"
+    ],
+    "separation": {
+      "requested": false,
+      "synthetic_requested": false,
+      "mode": "disabled",
+      "synthetic_ran": false,
+      "htdemucs_ran": false,
+      "fallback": false
+    },
+    "harmonic_masking": {
+      "enabled": true,
+      "applied": false,
+      "mask_width": 0.02,
+      "n_harmonics": 12
+    },
+    "iss": {
+      "enabled": true,
+      "layers_found": 0,
+      "max_layers": 8
+    },
+    "skyline_mode": "skyline_top_voice",
+    "voice_tracking": {
+      "max_alt_voices": 4,
+      "max_jump_cents": 150.0
+    }
+  },
+  "config": {
+    "stage_a": {
+      "target_sample_rate": 44100,
+      "channel_handling": "mono_sum",
+      "dc_offset_removal": true,
+      "transient_pre_emphasis": {
+        "enabled": true,
+        "alpha": 0.97
+      },
+      "high_pass_filter_cutoff": {
+        "value": 55.0
+      },
+      "high_pass_filter_order": {
+        "value": 4
+      },
+      "silence_trimming": {
+        "enabled": true,
+        "top_db": 50
+      },
+      "loudness_normalization": {
+        "enabled": true,
+        "target_lufs": -23.0
+      },
+      "peak_limiter": {
+        "enabled": false,
+        "mode": "soft",
+        "ceiling_db": -1.0
+      },
+      "noise_floor_estimation": {
+        "percentile": 30
+      },
+      "bpm_detection": {
+        "enabled": true
+      }
+    },
+    "stage_b": {
+      "separation": {
+        "enabled": false,
+        "model": "htdemucs",
+        "synthetic_model": false,
+        "overlap": 0.25,
+        "shifts": 1,
+        "harmonic_masking": {
+          "enabled": true,
+          "mask_width": 0.02,
+          "n_harmonics": 12
+        }
+      },
+      "confidence_voicing_threshold": 0.58,
+      "polyphonic_voicing_relaxation": 0.07,
+      "confidence_priority_floor": 0.5,
+      "pitch_disagreement_cents": 45.0,
+      "ensemble_weights": {
+        "swiftf0": 0.5,
+        "sacf": 0.3,
+        "cqt": 0.2,
+        "yin": 0.3,
+        "rmvpe": 0.5,
+        "crepe": 0.5
+      },
+      "polyphonic_peeling": {
+        "max_layers": 8,
+        "mask_width": 0.03,
+        "min_mask_width": 0.02,
+        "max_mask_width": 0.08,
+        "mask_growth": 1.1,
+        "mask_shrink": 0.9,
+        "harmonic_snr_stop_db": 3.0,
+        "residual_rms_stop_ratio": 0.08,
+        "residual_flatness_stop": 0.45,
+        "validator_cents_tolerance": 50.0,
+        "validator_agree_window": 5,
+        "validator_disagree_decay": 0.6,
+        "validator_min_agree_frames": 2,
+        "validator_min_disagree_frames": 2,
+        "max_harmonics": 12,
+        "force_on_mix": true
+      },
+      "voice_tracking": {
+        "max_alt_voices": 4,
+        "max_jump_cents": 150.0,
+        "hangover_frames": 2,
+        "smoothing": 0.35,
+        "confidence_bias": 5.0
+      },
+      "detectors": {
+        "rmvpe": {
+          "enabled": false,
+          "fmin": 50.0,
+          "fmax": 1200.0,
+          "hop_length": 160,
+          "silence_threshold": 0.04
+        },
+        "crepe": {
+          "enabled": false,
+          "model_capacity": "full",
+          "fmin": 190.0,
+          "fmax": 3500.0,
+          "use_viterbi": false
+        },
+        "swiftf0": {
+          "enabled": true
+        },
+        "yin": {
+          "enabled": true
+        },
+        "sacf": {
+          "enabled": true
+        },
+        "cqt": {
+          "enabled": true
+        }
+      }
+    },
+    "stage_c": {
+      "segmentation_method": {
+        "method": "hmm",
+        "states": [
+          "attack",
+          "sustain",
+          "silence"
+        ]
+      },
+      "min_note_duration_ms": 30.0,
+      "min_note_duration_ms_poly": 55.0,
+      "frame_stability": {
+        "stable_frames_required": 2
+      },
+      "pitch_tolerance_cents": 50.0,
+      "gap_filling": {
+        "max_gap_ms": 100.0
+      },
+      "polyphonic_confidence": {
+        "melody": 0.35,
+        "accompaniment": 0.48
+      },
+      "velocity_map": {
+        "min_db": -40.0,
+        "max_db": -4.0,
+        "min_vel": 20.0,
+        "max_vel": 105.0
+      },
+      "polyphony_filter": {
+        "mode": "skyline_top_voice"
+      }
+    },
+    "stage_d": {
+      "divisions_per_quarter": 24,
+      "staff_split_point": {
+        "pitch": 60
+      },
+      "staccato_marking": {
+        "threshold_beats": 0.25
+      },
+      "glissando_threshold_general": {
+        "enabled": false,
+        "min_semitones": 2.0,
+        "max_time_ms": 500.0
+      },
+      "glissando_handling_piano": {
+        "enabled": false
+      }
+    },
+    "instrument_profiles": []
+  }
+}

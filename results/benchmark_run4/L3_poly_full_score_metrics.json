@@ -1,0 +1,8 @@
+{
+  "level": "L3",
+  "name": "poly_full_score",
+  "note_f1": 0.17391304347826086,
+  "onset_mae_ms": 49.3877551020408,
+  "predicted_count": 11,
+  "gt_count": 12
+}

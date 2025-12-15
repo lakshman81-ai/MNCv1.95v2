@@ -1,0 +1,8 @@
+{
+  "level": "L4",
+  "name": "old_macdonald",
+  "note_f1": 0.631578947368421,
+  "onset_mae_ms": 8.828420256991672,
+  "predicted_count": 12,
+  "gt_count": 7
+}

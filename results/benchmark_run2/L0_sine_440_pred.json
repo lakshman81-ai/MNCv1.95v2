@@ -1,0 +1,20 @@
+[
+  {
+    "start_sec": 0.0,
+    "end_sec": 0.9636281179138322,
+    "midi_note": 69,
+    "pitch_hz": 441.2715148925781,
+    "confidence": 0.9433161702500769,
+    "velocity": 105,
+    "rms_value": 0.0,
+    "is_grace": false,
+    "dynamic": "mf",
+    "voice": 1,
+    "staff": "treble",
+    "measure": null,
+    "beat": null,
+    "duration_beats": null,
+    "alternatives": [],
+    "spec_thumb": null
+  }
+]

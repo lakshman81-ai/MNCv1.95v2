@@ -1,0 +1,11 @@
+{
+  "notes": [
+    { "midi_note": 60, "start_sec": 0.0, "end_sec": 0.5 },
+    { "midi_note": 60, "start_sec": 0.5, "end_sec": 1.0 },
+    { "midi_note": 60, "start_sec": 1.0, "end_sec": 1.5 },
+    { "midi_note": 55, "start_sec": 1.5, "end_sec": 2.0 },
+    { "midi_note": 57, "start_sec": 2.0, "end_sec": 2.5 },
+    { "midi_note": 57, "start_sec": 2.5, "end_sec": 3.0 },
+    { "midi_note": 55, "start_sec": 3.0, "end_sec": 4.0 }
+  ]
+}
