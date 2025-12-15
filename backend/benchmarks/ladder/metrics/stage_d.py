@@ -34,7 +34,7 @@ def tokenize_score(score_path: str) -> List[str]:
     tokens = []
     try:
         s = music21.converter.parse(score_path)
-        for n in s.flat.notes:
+        for n in s.flatten().notes:
             if isinstance(n, music21.note.Note):
                 dur = round(n.quarterLength, 2)
                 pc = n.pitch.name

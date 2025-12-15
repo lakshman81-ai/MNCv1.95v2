@@ -23,7 +23,7 @@ def calculate_stage_b_metrics(
     mf.read()
     mf.close()
     s = music21.midi.translate.midiFileToStream(mf)
-    flat = s.flat.notes
+    flat = s.flatten().notes
 
     # Construct Ground Truth F0 array
     ref_f0 = np.zeros_like(time_grid)
@@ -48,7 +48,7 @@ def calculate_stage_b_metrics(
     sec_per_q = 60.0 / qpm
 
     # Check if midi has tempo
-    tempos = s.flat.getElementsByClass(music21.tempo.MetronomeMark)
+    tempos = s.flatten().getElementsByClass(music21.tempo.MetronomeMark)
     if tempos:
         qpm = tempos[0].number
         sec_per_q = 60.0 / qpm

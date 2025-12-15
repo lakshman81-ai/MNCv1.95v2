@@ -347,7 +347,7 @@ def iterative_spectral_subtraction(
                 nperseg=n_fft,
                 noverlap=max(0, n_fft - hop),
                 input_onesided=True,
-                boundary=None,
+                boundary="zeros",
             )
             residual = np.asarray(residual2, dtype=np.float32).reshape(-1)
             if residual.size < y.size:
@@ -429,12 +429,13 @@ class YinDetector(BasePitchDetector):
         # librosa path
         if librosa is not None:
             try:
+                frame_length = int(min(len(y), self.n_fft)) if y.size > 0 else int(self.n_fft)
                 f0, voiced_flag, voiced_prob = librosa.pyin(
                     y=y,
                     fmin=float(self.fmin),
                     fmax=float(self.fmax),
                     sr=int(self.sr),
-                    frame_length=int(self.n_fft),
+                    frame_length=frame_length,
                     hop_length=int(self.hop_length),
                     fill_na=0.0,
                 )

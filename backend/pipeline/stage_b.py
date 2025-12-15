@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
 import warnings
+import logging
 import importlib.util
 try:
     from scipy.optimize import linear_sum_assignment
@@ -35,6 +36,9 @@ __all__ = [
 SCIPY_SIGNAL = None
 if importlib.util.find_spec("scipy.signal"):
     import scipy.signal as SCIPY_SIGNAL
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _module_available(module_name: str) -> bool:
@@ -431,8 +435,8 @@ def _augment_with_harmonic_masks(
             fs=stem.sr,
             nperseg=n_fft,
             noverlap=max(0, n_fft - hop),
-            boundary=None,
-            padded=False,
+            boundary="zeros",
+            padded=True,
         )
 
         n_frames = Z.shape[1]
@@ -467,7 +471,7 @@ def _augment_with_harmonic_masks(
             nperseg=n_fft,
             noverlap=max(0, n_fft - hop),
             input_onesided=True,
-            boundary=None,
+            boundary="zeros",
         )
         _, residual_audio = scipy.signal.istft(
             Z_resid,
@@ -475,7 +479,7 @@ def _augment_with_harmonic_masks(
             nperseg=n_fft,
             noverlap=max(0, n_fft - hop),
             input_onesided=True,
-            boundary=None,
+            boundary="zeros",
         )
 
         melody_audio = np.asarray(melody_audio, dtype=np.float32)
@@ -638,7 +642,7 @@ def extract_features(
 
     # Ensure baseline fallback if no detectors enabled/working
     if not detectors:
-        warnings.warn("No detectors enabled or initialized in Stage B. Falling back to default YIN/ACF.")
+        LOGGER.warning("No detectors enabled or initialized in Stage B. Falling back to default YIN/ACF.")
         detectors["yin"] = YinDetector(sr, hop_length)
 
     stem_timelines: Dict[str, List[FramePitch]] = {}
@@ -693,7 +697,7 @@ def extract_features(
                 stem_results[name] = (f0, conf)
                 per_detector[stem_name][name] = (f0, conf)
             except Exception as e:
-                warnings.warn(f"Detector {name} failed on stem {stem_name}: {e}")
+                LOGGER.warning("Detector %s failed on stem %s: %s", name, stem_name, e)
 
         # Ensemble Merge with disagreement and SwiftF0 priority floor
         if stem_results:
@@ -739,7 +743,7 @@ def extract_features(
                     all_layers.extend([f0 for f0, _ in iss_layers])
                     iss_total_layers += len(iss_layers)
                 except Exception as e:
-                    warnings.warn(f"ISS peeling failed for stem {stem_name}: {e}")
+                    LOGGER.warning("ISS peeling failed for stem %s: %s", stem_name, e)
 
         # Calculate RMS
         n_fft = stage_a_out.meta.window_size if stage_a_out.meta.window_size else 2048
