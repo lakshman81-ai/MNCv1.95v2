@@ -362,3 +362,40 @@ def _resample_audio(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarr
         num_samples = int(len(audio) * float(target_sr) / float(orig_sr))
         return scipy.signal.resample(audio, num_samples)
     return audio
+
+
+def warped_linear_prediction(
+    audio: np.ndarray,
+    sr: int,
+    order: int = 16,
+    pre_emphasis: float = 0.97,
+) -> np.ndarray:
+    """Lightweight LPC-based whitening used in separation tests.
+
+    The implementation is intentionally robust to missing optional
+    dependencies (``librosa``/``scipy``) by falling back to a simple
+    pre-emphasis filter when LPC is unavailable. The function always
+    returns an array with the same length as ``audio``.
+    """
+
+    if len(audio) == 0:
+        return audio
+
+    # Try an LPC whitening residual when librosa + scipy are available.
+    # To avoid heavy computation or optional dependency overhead on long
+    # signals, we constrain LPC whitening to shorter inputs and fall back
+    # to a light pre-emphasis otherwise.
+    if librosa is not None and scipy.signal and len(audio) <= 16384:
+        try:
+            coeffs = librosa.lpc(audio, order=order)
+            # Filter the signal with LPC coefficients to obtain the prediction error
+            # (whitened signal). scipy.signal.lfilter expects the filter numerator
+            # first; LPC coeffs already have a leading 1.
+            return scipy.signal.lfilter(coeffs, [1.0], audio)
+        except Exception:
+            pass
+
+    # Fallback: simple pre-emphasis that flattens the spectrum modestly.
+    emphasized = np.copy(audio)
+    emphasized[1:] = audio[1:] - pre_emphasis * audio[:-1]
+    return emphasized
