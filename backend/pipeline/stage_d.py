@@ -65,7 +65,8 @@ def quantize_and_render(
     part_bass.append(clef.BassClef())
 
     # Time Signature
-    part_treble.append(meter.TimeSignature(ts_str))
+    ts_obj = meter.TimeSignature(ts_str)
+    part_treble.append(ts_obj)
     part_bass.append(meter.TimeSignature(ts_str))
 
     # Tempo (use separate objects per part to avoid reusing the same element)
@@ -179,6 +180,12 @@ def quantize_and_render(
             part_bass.insert(offset, m21_obj)
         else:
             part_treble.insert(offset, m21_obj)
+
+    # Ensure we have at least one measure to avoid makeMeasures/makeRests failures
+    if len(events_sorted) == 0:
+        default_rest_len = ts_obj.barDuration.quarterLength if ts_obj.barDuration else 4.0
+        part_treble.insert(0.0, note.Rest(quarterLength=default_rest_len))
+        part_bass.insert(0.0, note.Rest(quarterLength=default_rest_len))
 
     s.append(part_treble)
     s.append(part_bass)
