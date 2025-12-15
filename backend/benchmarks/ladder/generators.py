@@ -99,7 +99,7 @@ def apply_expressive_performance(score_in, intensity=1.0):
         # Base velocity
         base_vel = 90
 
-        notes = list(p.flat.notes)
+        notes = list(p.flatten().notes)
         total_notes = len(notes)
 
         for i, n in enumerate(notes):

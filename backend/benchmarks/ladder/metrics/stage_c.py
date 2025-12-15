@@ -25,12 +25,12 @@ def calculate_stage_c_metrics(
     # Need accurate timing. Assuming 100bpm or reading tempo.
     qpm = 100.0
     sec_per_q = 60.0 / qpm
-    tempos = s.flat.getElementsByClass(music21.tempo.MetronomeMark)
+    tempos = s.flatten().getElementsByClass(music21.tempo.MetronomeMark)
     if tempos:
         qpm = tempos[0].number
         sec_per_q = 60.0 / qpm
 
-    for n in s.flat.notes:
+    for n in s.flatten().notes:
         start = n.offset * sec_per_q
         end = (n.offset + n.quarterLength) * sec_per_q
 

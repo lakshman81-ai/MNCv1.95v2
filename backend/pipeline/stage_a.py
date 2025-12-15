@@ -7,10 +7,10 @@ and loudness normalization.
 
 from __future__ import annotations
 import importlib.util
+import warnings
 from typing import Optional, Tuple, Dict, List, Union
 import numpy as np
 import math
-import warnings
 
 # Optional dependencies
 try:
@@ -168,7 +168,10 @@ def _detect_tempo_and_beats(audio: np.ndarray, sr: int, enabled: bool) -> Tuple[
     try:
         tempo_est, beat_frames = librosa.beat.beat_track(y=audio, sr=sr)
         beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-        tempo_val = float(tempo_est) if tempo_est is not None else None
+        if tempo_est is None:
+            tempo_val = None
+        else:
+            tempo_val = float(np.asarray(tempo_est).reshape(-1)[0])
         return tempo_val, beat_times
     except Exception as exc:  # pragma: no cover - defensive
         warnings.warn(f"Beat tracking failed: {exc}")
@@ -232,7 +235,10 @@ def load_and_preprocess(
     try:
         if librosa:
             # librosa.load handles resampling and mono conversion (mono=True by default)
-            audio, sr = librosa.load(audio_path, sr=target_sr, mono=True)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="PySoundFile failed.*", category=UserWarning)
+                warnings.filterwarnings("ignore", message="librosa.core.audio.__audioread_load", category=FutureWarning)
+                audio, sr = librosa.load(audio_path, sr=target_sr, mono=True)
         else:
             audio, sr = _load_audio_fallback(audio_path, target_sr)
     except Exception as e:

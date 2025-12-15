@@ -59,7 +59,7 @@ def midi_to_wav_synth(score_stream: stream.Score, wav_path: str, sr: int = 22050
 
     sec_per_quarter = 60.0 / current_bpm
 
-    flat_els = score_stream.flat.elements
+    flat_els = score_stream.flatten().elements
 
     for el in flat_els:
         if isinstance(el, note.Note):
