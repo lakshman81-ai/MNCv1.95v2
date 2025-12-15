@@ -38,6 +38,11 @@ def hz_to_midi(hz: float) -> float:
     return 69.0 + 12.0 * float(np.log2(hz / 440.0))
 
 
+def midi_to_hz(midi: float) -> float:
+    """Convert MIDI note number to frequency in Hz."""
+    return float(440.0 * (2.0 ** ((float(midi) - 69.0) / 12.0)))
+
+
 def _safe_float(x: Any, default: float) -> float:
     try:
         return float(x)
