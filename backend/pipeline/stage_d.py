@@ -65,21 +65,18 @@ def quantize_and_render(
     part_bass.append(clef.BassClef())
 
     # Time Signature
-    ts_obj = meter.TimeSignature(ts_str)
-    part_treble.append(ts_obj)
-    part_bass.append(ts_obj)
+    part_treble.append(meter.TimeSignature(ts_str))
+    part_bass.append(meter.TimeSignature(ts_str))
 
-    # Tempo
-    mm = tempo.MetronomeMark(number=float(bpm))
-    part_treble.append(mm)
-    part_bass.append(mm)
+    # Tempo (use separate objects per part to avoid reusing the same element)
+    part_treble.append(tempo.MetronomeMark(number=float(bpm)))
+    part_bass.append(tempo.MetronomeMark(number=float(bpm)))
 
     # Key (if detected)
     if analysis_data.meta.detected_key:
         try:
-            k = key.Key(analysis_data.meta.detected_key)
-            part_treble.append(k)
-            part_bass.append(k)
+            part_treble.append(key.Key(analysis_data.meta.detected_key))
+            part_bass.append(key.Key(analysis_data.meta.detected_key))
         except Exception:
             pass
 
