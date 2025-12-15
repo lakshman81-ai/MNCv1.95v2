@@ -6,6 +6,7 @@ and loudness normalization.
 """
 
 from __future__ import annotations
+import importlib.util
 from typing import Optional, Tuple, Dict, List, Union
 import numpy as np
 import math
@@ -27,6 +28,15 @@ try:
     import scipy.signal
 except ImportError:
     pass
+
+# Demucs (optional)
+_demucs_spec = importlib.util.find_spec("demucs")
+if _demucs_spec:
+    from demucs.apply import apply_model
+    from demucs import pretrained
+else:  # pragma: no cover - optional dependency
+    apply_model = None  # type: ignore
+    pretrained = None  # type: ignore
 
 from .models import StageAOutput, MetaData, Stem, AudioType, AudioQuality
 from .config import PipelineConfig, StageAConfig
@@ -155,7 +165,8 @@ def _detect_tempo_and_beats(audio: np.ndarray, sr: int, enabled: bool) -> Tuple[
 
 def load_and_preprocess(
     audio_path: str,
-    config: Optional[Union[PipelineConfig, StageAConfig]] = None
+    config: Optional[Union[PipelineConfig, StageAConfig]] = None,
+    target_sr: Optional[int] = None,
 ) -> StageAOutput:
     """
     Stage A main entry point.
@@ -181,7 +192,7 @@ def load_and_preprocess(
         full_conf = config
         a_conf = config.stage_a
 
-    target_sr = a_conf.target_sample_rate
+    target_sr = int(target_sr) if target_sr is not None else a_conf.target_sample_rate
     target_lufs = float(a_conf.loudness_normalization.get("target_lufs", TARGET_LUFS))
     trim_db = float(a_conf.silence_trimming.get("top_db", SILENCE_THRESHOLD_DB))
 
@@ -271,15 +282,120 @@ def load_and_preprocess(
     # The requirement says Stage A output has "stems (mix / vocals ... depending on separation availability)"
     # But usually separation is a heavy process. If explicit separation is not in Stage A logic (it's in Stage B config),
     # we just provide 'mix'.
+    audio_type = detect_audio_type(audio, sr, nf_db)
+
     stems = {
         "mix": Stem(audio=audio, sr=sr, type="mix")
     }
 
+    # Optional separation (Demucs) when polyphonic
+    if audio_type == AudioType.POLYPHONIC and apply_model and pretrained:
+        model = pretrained.get_model()
+        import torch  # Local import to avoid mandatory dependency at module import time
+
+        audio_batch = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        demucs_out = apply_model(model, audio_batch, device="cpu")
+
+        source_names = getattr(model, "sources", ["vocals", "bass", "other", "drums"])
+        demucs_sr = getattr(model, "samplerate", sr)
+
+        for idx, name in enumerate(source_names):
+            stem_audio = demucs_out[0, idx].detach().cpu().numpy()
+            # Collapse to mono if stereo returned
+            if stem_audio.ndim > 1:
+                stem_audio = np.mean(stem_audio, axis=0)
+
+            stem_sr = 16000 if name == "vocals" else demucs_sr
+            if stem_sr != demucs_sr:
+                stem_audio = _resample_audio(stem_audio, demucs_sr, stem_sr)
+
+            stems[name] = Stem(audio=stem_audio.astype(np.float32), sr=stem_sr, type=name)
+
+    # Always provide a vocals stem (even if monophonic / separation disabled)
+    if "vocals" not in stems:
+        stems["vocals"] = Stem(
+            audio=_resample_audio(audio, sr, 16000).astype(np.float32),
+            sr=16000,
+            type="vocals",
+        )
+
+    meta.audio_type = audio_type
+
     return StageAOutput(
         stems=stems,
         meta=meta,
-        audio_type=AudioType.MONOPHONIC, # Default
+        audio_type=audio_type,
         noise_floor_rms=nf_rms,
         noise_floor_db=nf_db,
         beats=beat_times,
     )
+
+
+def detect_audio_type(audio: np.ndarray, sr: int, noise_floor_db: float = -80.0) -> AudioType:
+    """Lightweight heuristic to decide between monophonic and polyphonic content."""
+    if len(audio) == 0:
+        return AudioType.MONOPHONIC
+
+    # Spectral flatness > 0.3 usually implies richer harmonic content
+    flatness = 0.0
+    if librosa is not None:
+        try:
+            flatness = float(np.mean(librosa.feature.spectral_flatness(y=audio)))
+        except Exception:
+            flatness = 0.0
+
+    if flatness > 0.3:
+        return AudioType.POLYPHONIC
+
+    return AudioType.MONOPHONIC
+
+
+def _resample_audio(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
+    if orig_sr == target_sr:
+        return audio
+    if librosa is not None:
+        try:
+            return librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
+        except Exception:
+            pass
+    if scipy.signal:
+        num_samples = int(len(audio) * float(target_sr) / float(orig_sr))
+        return scipy.signal.resample(audio, num_samples)
+    return audio
+
+
+def warped_linear_prediction(
+    audio: np.ndarray,
+    sr: int,
+    order: int = 16,
+    pre_emphasis: float = 0.97,
+) -> np.ndarray:
+    """Lightweight LPC-based whitening used in separation tests.
+
+    The implementation is intentionally robust to missing optional
+    dependencies (``librosa``/``scipy``) by falling back to a simple
+    pre-emphasis filter when LPC is unavailable. The function always
+    returns an array with the same length as ``audio``.
+    """
+
+    if len(audio) == 0:
+        return audio
+
+    # Try an LPC whitening residual when librosa + scipy are available.
+    # To avoid heavy computation or optional dependency overhead on long
+    # signals, we constrain LPC whitening to shorter inputs and fall back
+    # to a light pre-emphasis otherwise.
+    if librosa is not None and scipy.signal and len(audio) <= 16384:
+        try:
+            coeffs = librosa.lpc(audio, order=order)
+            # Filter the signal with LPC coefficients to obtain the prediction error
+            # (whitened signal). scipy.signal.lfilter expects the filter numerator
+            # first; LPC coeffs already have a leading 1.
+            return scipy.signal.lfilter(coeffs, [1.0], audio)
+        except Exception:
+            pass
+
+    # Fallback: simple pre-emphasis that flattens the spectrum modestly.
+    emphasized = np.copy(audio)
+    emphasized[1:] = audio[1:] - pre_emphasis * audio[:-1]
+    return emphasized
