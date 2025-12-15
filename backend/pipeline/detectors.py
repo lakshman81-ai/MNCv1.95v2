@@ -478,6 +478,33 @@ class SACFDetector(BasePitchDetector):
         f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
         return f0, conf
 
+    def validate_curve(self, curve_hz: np.ndarray, audio: np.ndarray) -> float:
+        """Lightweight curve validator used in tests.
+
+        Computes the agreement between a candidate F0 curve and the SACF
+        estimate for the provided audio. The score is the proportion of frames
+        whose deviation is within 50 cents, weighted by the SACF confidence.
+        """
+
+        cand = np.asarray(curve_hz, dtype=np.float32).reshape(-1)
+        est_f0, est_conf = self.predict(audio)
+
+        n = min(len(cand), len(est_f0))
+        if n == 0:
+            return 0.0
+
+        cand = cand[:n]
+        est_f0 = est_f0[:n]
+        est_conf = est_conf[:n]
+
+        cents_diff = 1200.0 * np.log2(np.divide(cand, est_f0 + 1e-9))
+        agree = np.abs(cents_diff) <= 50.0
+        if np.sum(est_conf) <= 0.0:
+            return float(np.mean(agree))
+
+        score = float(np.sum(agree * est_conf) / np.sum(est_conf))
+        return score
+
 
 class CQTDetector(BasePitchDetector):
     """
@@ -489,10 +516,17 @@ class CQTDetector(BasePitchDetector):
         self.bins_per_octave = _safe_int(kwargs.get("bins_per_octave", 36), 36)
         self.n_bins = _safe_int(kwargs.get("n_bins", 7 * self.bins_per_octave), 7 * self.bins_per_octave)
 
-    def predict(self, audio: np.ndarray, audio_path: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def predict(
+        self,
+        audio: np.ndarray,
+        audio_path: Optional[str] = None,
+        polyphony: bool = False,
+        top_k: int = 3,
+    ) -> Tuple[Any, Any]:
         y = np.asarray(audio, dtype=np.float32).reshape(-1)
         if y.size == 0:
-            return np.zeros((0,), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+            empty = np.zeros((0,), dtype=np.float32)
+            return ([[]] if polyphony else empty), ([[]] if polyphony else empty)
 
         if librosa is None:
             self._warn_once("no_librosa", "CQTDetector disabled: librosa not available.")
@@ -512,11 +546,17 @@ class CQTDetector(BasePitchDetector):
             )
             M = np.abs(C).astype(np.float32)  # (bins, frames)
             if M.size == 0:
-                return np.zeros((0,), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+                empty = np.zeros((0,), dtype=np.float32)
+                return ([[]] if polyphony else empty), ([[]] if polyphony else empty)
+
+            freqs = librosa.cqt_frequencies(
+                n_bins=int(self.n_bins),
+                fmin=float(self.fmin),
+                bins_per_octave=int(self.bins_per_octave),
+            ).astype(np.float32)
 
             # dominant bin per frame
             idx = np.argmax(M, axis=0)
-            freqs = librosa.cqt_frequencies(n_bins=int(self.n_bins), fmin=float(self.fmin), bins_per_octave=int(self.bins_per_octave))
             f0 = freqs[idx].astype(np.float32)
 
             # confidence from peak-to-mean ratio
@@ -526,14 +566,37 @@ class CQTDetector(BasePitchDetector):
             conf = np.clip((conf - 1.0) / 4.0, 0.0, 1.0)  # squash
             conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
             f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
-            return f0, conf
+
+            if not polyphony:
+                return f0, conf
+
+            # Polyphonic mode: pick the top-k peaks per frame.
+            top_k = max(1, int(top_k))
+            pitches_list: List[List[float]] = []
+            confs_list: List[List[float]] = []
+            for t in range(M.shape[1]):
+                mag = M[:, t]
+                if mag.size == 0:
+                    pitches_list.append([])
+                    confs_list.append([])
+                    continue
+
+                top_idx = np.argsort(mag)[-top_k:][::-1]
+                top_freqs = freqs[top_idx]
+                top_conf = mag[top_idx] / (np.mean(mag) + 1e-9)
+                top_conf = np.clip((top_conf - 1.0) / 4.0, 0.0, 1.0)
+
+                pitches_list.append(top_freqs.tolist())
+                confs_list.append(top_conf.tolist())
+
+            return pitches_list, confs_list
         except Exception:
             # fallback to ACF
             frames = _frame_audio(y, frame_length=self.n_fft, hop_length=self.hop_length)
             f0, conf = _autocorr_pitch_per_frame(frames, sr=self.sr, fmin=self.fmin, fmax=self.fmax)
             conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
             f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
-            return f0, conf
+            return ([f0.tolist()] if polyphony else f0), ([conf.tolist()] if polyphony else conf)
 
 
 class SwiftF0Detector(BasePitchDetector):

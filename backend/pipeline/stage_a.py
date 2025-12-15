@@ -32,11 +32,22 @@ except ImportError:
 # Demucs (optional)
 _demucs_spec = importlib.util.find_spec("demucs")
 if _demucs_spec:
-    from demucs.apply import apply_model
-    from demucs import pretrained
+    try:
+        from demucs.apply import apply_model
+        from demucs import pretrained
+    except Exception:  # pragma: no cover - optional dependency failed
+        apply_model = None  # type: ignore
+        pretrained = None  # type: ignore
 else:  # pragma: no cover - optional dependency
     apply_model = None  # type: ignore
     pretrained = None  # type: ignore
+
+# Provide a dummy object so tests can patch `pretrained.get_model` even when
+# Demucs is not installed in the environment.
+if pretrained is None:
+    from types import SimpleNamespace
+
+    pretrained = SimpleNamespace(get_model=lambda *args, **kwargs: None)  # type: ignore
 
 from .models import StageAOutput, MetaData, Stem, AudioType, AudioQuality
 from .config import PipelineConfig, StageAConfig

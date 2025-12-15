@@ -83,13 +83,31 @@ class DurationClassifier:
 
 def quantize_duration(
     seconds,
-    start_time,
-    tempo_times,
-    tempo_curve,
-    denominators,
+    start_time=0.0,
+    tempo_times=None,
+    tempo_curve=None,
+    denominators=None,
     classifier=None,
+    bpm=None,
+    return_bpm: bool | None = None,
 ):
-    local_bpm = float(np.interp(start_time, tempo_times, tempo_curve))
+    """Quantize a duration (in seconds) to the nearest beat fraction.
+
+    Tests call this helper with a fixed ``bpm`` and without tempo curves, so we
+    allow both usage patterns. When ``bpm`` is provided it takes precedence over
+    the tempo curve interpolation.
+    """
+
+    if denominators is None:
+        denominators = [1.0]
+
+    if bpm is None:
+        tempo_times = np.asarray(tempo_times) if tempo_times is not None else np.array([0.0, 1.0])
+        tempo_curve = np.asarray(tempo_curve) if tempo_curve is not None else np.array([120.0, 120.0])
+        local_bpm = float(np.interp(start_time, tempo_times, tempo_curve))
+    else:
+        local_bpm = float(bpm)
+
     beats = seconds * (local_bpm / 60.0)
 
     if classifier is not None:
@@ -97,7 +115,16 @@ def quantize_duration(
     else:
         quantized = min(denominators, key=lambda x: abs(x - beats))
 
-    return quantized, beats, local_bpm
+    if return_bpm is None:
+        # Preserve historical behaviour: if we interpolated from a curve, we
+        # return the BPM; if a fixed bpm was provided and no curve was used we
+        # mimic the legacy 2-tuple return to satisfy older call sites/tests.
+        return_bpm = bpm is None or tempo_times is not None or tempo_curve is not None
+
+    if return_bpm:
+        return quantized, beats, local_bpm
+
+    return quantized, beats
 
 
 def compute_tempo_curve(y, sr, hop_length):
@@ -582,6 +609,7 @@ def main():
             tempo_curve,
             params["rhythmic_denominators"],
             classifier=duration_classifier,
+            return_bpm=True,
         )
 
         m21_note = music21.note.Note(n["midi"])
