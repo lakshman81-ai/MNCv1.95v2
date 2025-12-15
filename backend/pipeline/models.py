@@ -107,6 +107,29 @@ class StageBOutput:
     meta: Optional[MetaData] = None         # Passed through from Stage A
     diagnostics: Dict[str, Any] = field(default_factory=dict)  # Separation/masking/ISS flags
 
+    def __iter__(self):
+        """Enable tuple-style unpacking for legacy call sites/tests.
+
+        Historic callers expected ``(timeline, f0_main, f0_layers, stem_timelines)``.
+        We derive ``timeline`` from the first available stem timeline (or an empty
+        list) to maintain that behaviour while keeping the rich dataclass shape.
+        """
+
+        timeline = []
+        if self.stem_timelines:
+            # Prefer a deterministic stem if available.
+            for key in ("mix", "vocals", "other"):
+                if key in self.stem_timelines:
+                    timeline = self.stem_timelines[key]
+                    break
+            else:
+                timeline = next(iter(self.stem_timelines.values()))
+
+        yield timeline
+        yield self.f0_main
+        yield self.f0_layers
+        yield self.stem_timelines
+
 
 @dataclass
 class FramePitch:
