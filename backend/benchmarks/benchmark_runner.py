@@ -35,7 +35,14 @@ from backend.pipeline.stage_a import load_and_preprocess
 from backend.pipeline.stage_b import extract_features
 from backend.pipeline.stage_c import apply_theory, quantize_notes
 from backend.pipeline.stage_d import quantize_and_render
-from backend.benchmarks.metrics import note_f1, onset_offset_mae
+from backend.benchmarks.metrics import (
+    note_f1,
+    onset_offset_mae,
+    note_accuracy_by_section,
+    octave_error_rate,
+    voicing_f1_score,
+    si_sdr,
+)
 from backend.benchmarks.run_real_songs import run_song as run_real_song
 from backend.benchmarks.ladder.generators import generate_benchmark_example
 from backend.benchmarks.ladder.synth import midi_to_wav_synth
@@ -215,6 +222,8 @@ def run_pipeline_on_audio(
     config: PipelineConfig,
     audio_type: AudioType = AudioType.MONOPHONIC,
     audio_path: Optional[str] = None,
+    extra_stems: Optional[Dict[str, np.ndarray]] = None,
+    use_extra_stems_for_processing: bool = True,
 ) -> Dict[str, Any]:
     """Run full pipeline on raw audio array."""
 
@@ -240,6 +249,9 @@ def run_pipeline_on_audio(
     )
 
     stems = {"mix": Stem(audio=audio, sr=sr, type="mix")}
+    if extra_stems and use_extra_stems_for_processing:
+        for name, arr in extra_stems.items():
+            stems[name] = Stem(audio=arr, sr=sr, type=name)
     if audio_type == AudioType.POLYPHONIC_DOMINANT:
          # For L2, we might want to simulate separate stems if we had them,
          # but for now we feed mix and let Stage B handle it (or separation if enabled).
@@ -265,7 +277,8 @@ def run_pipeline_on_audio(
         "notes": notes_pred,
         "stage_b_out": stage_b_out,
         "transcription": transcription_result,
-        "resolved_config": config # Stage B might warn but doesn't mutate much, we log what we passed
+        "resolved_config": config, # Stage B might warn but doesn't mutate much, we log what we passed
+        "reference_stems": extra_stems or {},
     }
 
 
@@ -384,7 +397,70 @@ class BenchmarkSuite:
 
         return [merged[k] for k in sorted(merged.keys())]
 
-    def _save_run(self, level: str, name: str, res: Dict[str, Any], gt: List[Tuple[int, float, float]]):
+    def _l2_fixture(self) -> Tuple[np.ndarray, int, List[Tuple[int, float, float]], Dict[str, np.ndarray], List[Tuple[str, float, float]]]:
+        """Construct reusable synthetic audio and annotations for L2."""
+
+        sr = 44100
+        melody = synthesize_audio([(72, 0.5), (76, 0.5), (79, 0.5)], sr, 'sine')
+        bass = synthesize_audio([(48, 1.5)], sr, 'saw') * 0.5
+        mix = melody + bass
+
+        gt_melody = [(72, 0.0, 0.5), (76, 0.5, 1.0), (79, 1.0, 1.5)]
+        gt_stems = {"melody": melody, "bass": bass}
+        sections = [
+            ("phrase_a", 0.0, 0.5),
+            ("phrase_b", 0.5, 1.0),
+            ("phrase_c", 1.0, 1.5),
+        ]
+
+        return mix, sr, gt_melody, gt_stems, sections
+
+    def _compute_l2_metrics(
+        self,
+        stage_b_out: StageBOutput,
+        pred_notes: List[NoteEvent],
+        gt_notes: List[Tuple[int, float, float]],
+        gt_stems: Dict[str, np.ndarray],
+        sections: List[Tuple[str, float, float]],
+    ) -> Dict[str, Any]:
+        """Derive extended diagnostics for the L2 benchmark."""
+
+        hop = stage_b_out.meta.hop_length if stage_b_out.meta else 512
+        sr = stage_b_out.meta.sample_rate if stage_b_out.meta else 44100
+        gt_f0, _ = _notes_to_frame_track(gt_notes, sr, hop)
+        pred_f0 = stage_b_out.f0_main[: len(gt_f0)] if len(gt_f0) > 0 else np.array([], dtype=np.float32)
+
+        voicing = voicing_f1_score(pred_f0, gt_f0) if len(gt_f0) > 0 else float("nan")
+        per_section = note_accuracy_by_section(
+            [(n.midi_note, n.start_sec, n.end_sec) for n in pred_notes],
+            gt_notes,
+            sections,
+        )
+
+        stem_sdr = {}
+        for name, stem in stage_b_out.resolved_stems.items():
+            if name == "mix" or name not in gt_stems:
+                continue
+            stem_sdr[name] = si_sdr(gt_stems[name], stem.audio)
+
+        return {
+            "per_section_note_f1": per_section,
+            "octave_error_rate": octave_error_rate(
+                [(n.midi_note, n.start_sec, n.end_sec) for n in pred_notes],
+                gt_notes,
+            ),
+            "voicing_f1": voicing,
+            "stem_si_sdr": stem_sdr,
+        }
+
+    def _save_run(
+        self,
+        level: str,
+        name: str,
+        res: Dict[str, Any],
+        gt: List[Tuple[int, float, float]],
+        extra_metrics: Optional[Dict[str, Any]] = None,
+    ):
         """Save artifacts for a single run."""
         pred_notes = res['notes']
         pred_list = [(n.midi_note, n.start_sec, n.end_sec) for n in pred_notes]
@@ -407,6 +483,8 @@ class BenchmarkSuite:
             "predicted_count": len(pred_list),
             "gt_count": len(gt)
         }
+        if extra_metrics:
+            metrics.update(extra_metrics)
         self.results.append(metrics)
 
         # Save JSONs
@@ -512,25 +590,26 @@ class BenchmarkSuite:
 
     def run_L2_poly_dominant(self):
         logger.info("Running L2: Poly Dominant")
-
-        # Melody + Bass
-        # Melody: C5, E5, G5 (0.5s each)
-        # Bass: C3 (1.5s)
-        sr = 44100
-        melody = synthesize_audio([(72, 0.5), (76, 0.5), (79, 0.5)], sr, 'sine')
-        bass = synthesize_audio([(48, 1.5)], sr, 'saw') * 0.5 # Lower volume
-
-        mix = melody + bass
-        gt_melody = [(72, 0.0, 0.5), (76, 0.5, 1.0), (79, 1.0, 1.5)]
+        mix, sr, gt_melody, gt_stems, sections = self._l2_fixture()
 
         config = PipelineConfig()
         config.stage_b.separation['enabled'] = False
-        # Enable separation if possible, or assume dominant melody extraction works
-        # config.stage_b.separation['enabled'] = True
 
-        res = run_pipeline_on_audio(mix, sr, config, AudioType.POLYPHONIC_DOMINANT)
+        res = run_pipeline_on_audio(
+            mix,
+            sr,
+            config,
+            AudioType.POLYPHONIC_DOMINANT,
+            extra_stems=gt_stems,
+        )
 
-        m = self._save_run("L2", "melody_plus_bass_synthetic_sep", res, gt_melody)
+        m = self._save_run(
+            "L2",
+            "melody_plus_bass_synthetic_sep",
+            res,
+            gt_melody,
+            extra_metrics=self._compute_l2_metrics(res['stage_b_out'], res['notes'], gt_stems, sections),
+        )
 
         # We expect it to find the melody (highest energy/frequency?)
         # Standard YIN might track bass or jump. RMVPE/Swift should track melody.
@@ -548,8 +627,20 @@ class BenchmarkSuite:
         # High-capacity frontend experiment (CREPE + RMVPE)
         exp_config = self._poly_config(use_harmonic_masking=True)
         self._enable_high_capacity_frontend(exp_config)
-        exp_res = run_pipeline_on_audio(mix, sr, exp_config, AudioType.POLYPHONIC_DOMINANT)
-        m_exp = self._save_run("L2", "melody_plus_bass_crepe_rmvpe", exp_res, gt_melody)
+        exp_res = run_pipeline_on_audio(
+            mix,
+            sr,
+            exp_config,
+            AudioType.POLYPHONIC_DOMINANT,
+            extra_stems=gt_stems,
+        )
+        m_exp = self._save_run(
+            "L2",
+            "melody_plus_bass_crepe_rmvpe",
+            exp_res,
+            gt_melody,
+            extra_metrics=self._compute_l2_metrics(exp_res['stage_b_out'], exp_res['notes'], gt_stems, sections),
+        )
         logger.info(f"L2 CREPE/RMVPE Complete. F1: {m_exp['note_f1']}")
 
     def run_L3_full_poly(self):
@@ -653,7 +744,18 @@ class BenchmarkSuite:
         latest_path = os.path.join("results", "benchmark_latest.json")
 
         # CSV
-        header = ["level", "name", "note_f1", "onset_mae_ms", "predicted_count", "gt_count"]
+        header = [
+            "level",
+            "name",
+            "note_f1",
+            "onset_mae_ms",
+            "predicted_count",
+            "gt_count",
+            "voicing_f1",
+            "octave_error_rate",
+            "per_section_note_f1",
+            "stem_si_sdr",
+        ]
         with open(summary_path, "w") as f:
             f.write(",".join(header) + "\n")
             for r in self.results:

@@ -1110,4 +1110,5 @@ def extract_features(
         stem_timelines=stem_timelines,
         meta=stage_a_out.meta,
         diagnostics=diagnostics,
+        resolved_stems=resolved_stems,
     )
