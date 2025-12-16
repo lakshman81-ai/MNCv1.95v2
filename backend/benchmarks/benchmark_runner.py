@@ -28,6 +28,7 @@ import copy
 from music21 import tempo, chord
 
 from backend.pipeline.config import PipelineConfig, InstrumentProfile
+from backend.pipeline.poly_dominant_plan import L2_POLY_DOMINANT_PLAN
 from backend.pipeline.models import (
     StageAOutput, MetaData, Stem, AnalysisData, AudioType, NoteEvent
 )
@@ -764,6 +765,13 @@ def main():
         pass
 
     runner.generate_summary()
+
+
+def get_l2_retraining_plan() -> Dict[str, Any]:
+    """Expose the structured L2 poly-dominant retraining and augmentation plan."""
+
+    return L2_POLY_DOMINANT_PLAN.as_dict()
+
 
 if __name__ == "__main__":
     main()
