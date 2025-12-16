@@ -106,6 +106,7 @@ class StageBOutput:
     stem_timelines: Dict[str, List["FramePitch"]] = field(default_factory=dict)
     meta: Optional[MetaData] = None         # Passed through from Stage A
     diagnostics: Dict[str, Any] = field(default_factory=dict)  # Separation/masking/ISS flags
+    resolved_stems: Dict[str, Stem] = field(default_factory=dict)
 
     def __iter__(self):
         """Enable tuple-style unpacking for legacy call sites/tests.
