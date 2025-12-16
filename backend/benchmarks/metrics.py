@@ -169,60 +169,24 @@ def onset_offset_mae(pred_notes: List[Tuple[int, float, float]], gt_notes: List[
     return float(np.mean(errors_start)), float(np.mean(errors_end))
 
 
-def octave_error_rate(
-    pred_notes: List[Tuple[int, float, float]],
-    gt_notes: List[Tuple[int, float, float]],
-    onset_tol: float = 0.05,
-) -> float:
-    """Rate of predictions that land an octave away from a ground-truth onset."""
+def si_sdr(pred: np.ndarray, target: np.ndarray, eps: float = 1e-8) -> float:
+    """Scale-invariant SDR in linear domain."""
 
-    if not gt_notes or not pred_notes:
+    pred = np.asarray(pred, dtype=np.float64).reshape(-1)
+    target = np.asarray(target, dtype=np.float64).reshape(-1)
+
+    n = min(len(pred), len(target))
+    if n == 0:
+        return float('nan')
+    pred = pred[:n]
+    target = target[:n]
+
+    target_energy = np.sum(target ** 2) + eps
+    if target_energy <= eps:
         return float('nan')
 
-    octave_errors = 0
-    for p_midi, p_start, _ in pred_notes:
-        for g_midi, g_start, _ in gt_notes:
-            if abs(p_start - g_start) <= onset_tol and abs(p_midi - g_midi) in (12, 24):
-                octave_errors += 1
-                break
+    scale = np.sum(pred * target) / target_energy
+    projection = scale * target
+    noise = pred - projection
 
-    return float(octave_errors / max(len(gt_notes), 1))
-
-
-def note_accuracy_by_section(
-    pred_notes: List[Tuple[int, float, float]],
-    gt_notes: List[Tuple[int, float, float]],
-    sections: List[Tuple[str, float, float]],
-) -> Dict[str, float]:
-    """Compute note F1 for each labeled section (start_sec, end_sec)."""
-
-    per_section = {}
-    for name, start, end in sections:
-        filtered_pred = [(m, s, e) for m, s, e in pred_notes if s >= start and s < end]
-        filtered_gt = [(m, s, e) for m, s, e in gt_notes if s >= start and s < end]
-        per_section[name] = note_f1(filtered_pred, filtered_gt)
-    return per_section
-
-
-def si_sdr(reference: np.ndarray, estimate: np.ndarray, eps: float = 1e-8) -> float:
-    """Scale-Invariant SDR between reference and estimate."""
-
-    reference = np.asarray(reference, dtype=np.float64)
-    estimate = np.asarray(estimate, dtype=np.float64)
-    if reference.size == 0 or estimate.size == 0:
-        return float('nan')
-
-    # Ensure same length
-    if estimate.size > reference.size:
-        estimate = estimate[: reference.size]
-    elif reference.size > estimate.size:
-        estimate = np.pad(estimate, (0, reference.size - estimate.size))
-
-    # Projection
-    dot = np.sum(reference * estimate)
-    norm_sq = np.sum(reference ** 2) + eps
-    s_target = (dot / norm_sq) * reference
-    e_noise = estimate - s_target
-
-    ratio = np.sum(s_target ** 2) / (np.sum(e_noise ** 2) + eps)
-    return float(10 * np.log10(ratio + eps))
+    return float(10 * np.log10((np.sum(projection ** 2) + eps) / (np.sum(noise ** 2) + eps)))

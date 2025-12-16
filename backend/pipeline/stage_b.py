@@ -10,6 +10,7 @@ import numpy as np
 import warnings
 import logging
 import importlib.util
+import os
 try:
     from scipy.optimize import linear_sum_assignment
 except Exception:  # pragma: no cover - optional dependency
@@ -205,6 +206,78 @@ def _run_htdemucs(audio: np.ndarray, sr: int, model_name: str, overlap: float, s
     return separated
 
 
+def _compute_loudness(audio: np.ndarray, sr: int) -> Tuple[float, float]:
+    """Return (rms, lufs_estimate). Uses pyloudnorm if available."""
+    rms = float(np.sqrt(np.mean(np.square(audio)))) if len(audio) else 0.0
+    lufs = -80.0
+    try:
+        if _module_available("pyloudnorm"):
+            import pyloudnorm
+
+            meter = pyloudnorm.Meter(sr)
+            loudness = meter.integrated_loudness(audio)
+            if not np.isinf(loudness):
+                lufs = float(loudness)
+        elif rms > 0.0:
+            lufs = 20.0 * np.log10(rms + 1e-12)
+    except Exception:
+        if rms > 0.0:
+            lufs = 20.0 * np.log10(rms + 1e-12)
+    return rms, lufs
+
+
+def _normalize_stems(
+    stems: Dict[str, Stem],
+    sr: int,
+    stem_cfg: Dict[str, Any],
+    diagnostics: Dict[str, Any],
+) -> Dict[str, Stem]:
+    """Normalize stems to a shared loudness target for F0 stability."""
+
+    if not stem_cfg.get("enabled", False):
+        diagnostics["stem_normalization"] = {"enabled": False}
+        return stems
+
+    target_lufs = float(stem_cfg.get("target_lufs", -18.0))
+    epsilon = float(stem_cfg.get("epsilon_rms", 1e-6))
+    match_mix = bool(stem_cfg.get("match_mix_lufs", True))
+
+    normalized: Dict[str, Stem] = {}
+    gains_db: Dict[str, float] = {}
+    loudness_snapshots: Dict[str, Dict[str, float]] = {}
+
+    mix_ref = stems.get("mix")
+    _, mix_lufs = _compute_loudness(mix_ref.audio, sr) if mix_ref else (0.0, target_lufs)
+    target = mix_lufs if match_mix and not np.isinf(mix_lufs) else target_lufs
+
+    for name, stem in stems.items():
+        if name == "mix":
+            normalized[name] = stem
+            continue
+
+        rms, lufs = _compute_loudness(stem.audio, sr)
+        if rms <= epsilon:
+            normalized[name] = stem
+            gains_db[name] = 0.0
+            loudness_snapshots[name] = {"rms": rms, "lufs": lufs}
+            continue
+
+        desired_gain_db = target - lufs
+        gain_lin = 10.0 ** (desired_gain_db / 20.0)
+        normalized_audio = stem.audio * gain_lin
+        normalized[name] = type(stem)(audio=normalized_audio, sr=stem.sr, type=stem.type)
+        gains_db[name] = desired_gain_db
+        loudness_snapshots[name] = {"rms": rms, "lufs": lufs}
+
+    diagnostics["stem_normalization"] = {
+        "enabled": True,
+        "target_lufs": target,
+        "gains_db": gains_db,
+        "source_loudness": loudness_snapshots,
+    }
+    return normalized | {"mix": stems.get("mix")} if stems.get("mix") else normalized
+
+
 def _resolve_separation(stage_a_out: StageAOutput, b_conf) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Resolve separation strategy and track which path actually executed.
@@ -233,6 +306,10 @@ def _resolve_separation(stage_a_out: StageAOutput, b_conf) -> Tuple[Dict[str, An
     sep_conf = b_conf.separation
     overlap = sep_conf.get("overlap", 0.25)
     shifts = sep_conf.get("shifts", 1)
+    model_name = sep_conf.get("model", "htdemucs")
+    checkpoint_path = sep_conf.get("checkpoint_path")
+    mdx23_arch = sep_conf.get("mdx23_arch")
+    stem_norm_cfg = sep_conf.get("stem_normalization", {})
 
     if diag["synthetic_requested"]:
         synthetic = SyntheticMDXSeparator(sample_rate=mix_stem.sr, hop_length=stage_a_out.meta.hop_length)
@@ -248,20 +325,58 @@ def _resolve_separation(stage_a_out: StageAOutput, b_conf) -> Tuple[Dict[str, An
             warnings.warn(f"Synthetic separator failed; falling back to {sep_conf.get('model', 'htdemucs')}: {exc}")
             diag["fallback"] = True
 
-    separated = _run_htdemucs(
-        mix_stem.audio,
-        mix_stem.sr,
-        sep_conf.get("model", "htdemucs"),
-        overlap,
-        shifts,
-    )
+    separated = None
+
+    # Try MDX23C (if bundled) before the fallback Demucs checkpoints
+    if mdx23_arch:
+        separated = _run_htdemucs(mix_stem.audio, mix_stem.sr, mdx23_arch, overlap, shifts)
+        if separated:
+            diag.update({"mode": mdx23_arch, "htdemucs_ran": True})
+
+    if separated is None:
+        separated = _run_htdemucs(
+            mix_stem.audio,
+            mix_stem.sr,
+            model_name,
+            overlap,
+            shifts,
+        )
+
+    # Optional checkpoint override for Demucs/MDX architectures
+    if separated is None and checkpoint_path:
+        try:
+            if _module_available("torch") and _module_available("demucs.pretrained") and os.path.exists(checkpoint_path):
+                import torch
+                from demucs.pretrained import get_model
+                from demucs.apply import apply_model
+
+                model = get_model(model_name)
+                state = torch.load(checkpoint_path, map_location="cpu")
+                state_dict = state.get("state_dict", state)
+                model.load_state_dict(state_dict, strict=False)
+
+                resampled = mix_stem.audio
+                if getattr(model, "samplerate", mix_stem.sr) != mix_stem.sr:
+                    ratio = float(getattr(model, "samplerate")) / float(mix_stem.sr)
+                    indices = np.arange(0, len(mix_stem.audio) * ratio) / ratio
+                    resampled = np.interp(indices, np.arange(len(mix_stem.audio)), mix_stem.audio)
+
+                mix_tensor = torch.tensor(resampled, dtype=torch.float32)[None, None, :]
+                with torch.no_grad():
+                    demucs_out = apply_model(model, mix_tensor, overlap=overlap, shifts=shifts)
+                sources = getattr(model, "sources", ["vocals", "drums", "bass", "other"])
+                separated = {
+                    name: demucs_out[0, idx].mean(dim=0).cpu().numpy()
+                    for idx, name in enumerate(sources)
+                }
+                diag.update({"mode": checkpoint_path, "htdemucs_ran": True})
+        except Exception as exc:  # pragma: no cover - optional dependency path
+            warnings.warn(f"Checkpoint override failed ({exc}); skipping neural separation.")
 
     if separated:
-        diag.update({"mode": sep_conf.get("model", "htdemucs"), "htdemucs_ran": True})
-        return {
-            name: type(mix_stem)(audio=audio, sr=mix_stem.sr, type=name)
-            for name, audio in separated.items()
-        } | {"mix": mix_stem}, diag
+        normalized = _normalize_stems({name: type(mix_stem)(audio=audio, sr=mix_stem.sr, type=name) for name, audio in separated.items()} | {"mix": mix_stem}, mix_stem.sr, stem_norm_cfg, diag)
+        diag.update({"mode": diag.get("mode", model_name), "htdemucs_ran": True})
+        return normalized, diag
 
     diag["mode"] = "passthrough"
     return stage_a_out.stems, diag
@@ -874,6 +989,7 @@ def extract_features(
         f0_layers=all_layers,
         per_detector=per_detector,
         stem_timelines=stem_timelines,
+        stems=resolved_stems,
         meta=stage_a_out.meta,
         diagnostics=diagnostics,
         resolved_stems=resolved_stems,
