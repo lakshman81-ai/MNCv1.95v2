@@ -992,4 +992,5 @@ def extract_features(
         stems=resolved_stems,
         meta=stage_a_out.meta,
         diagnostics=diagnostics,
+        resolved_stems=resolved_stems,
     )

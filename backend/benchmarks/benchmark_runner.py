@@ -214,6 +214,8 @@ def run_pipeline_on_audio(
     config: PipelineConfig,
     audio_type: AudioType = AudioType.MONOPHONIC,
     audio_path: Optional[str] = None,
+    extra_stems: Optional[Dict[str, np.ndarray]] = None,
+    use_extra_stems_for_processing: bool = True,
 ) -> Dict[str, Any]:
     """Run full pipeline on raw audio array."""
 
@@ -238,6 +240,9 @@ def run_pipeline_on_audio(
     )
 
     stems = {"mix": Stem(audio=audio, sr=sr, type="mix")}
+    if extra_stems and use_extra_stems_for_processing:
+        for name, arr in extra_stems.items():
+            stems[name] = Stem(audio=arr, sr=sr, type=name)
     if audio_type == AudioType.POLYPHONIC_DOMINANT:
          # For L2, we might want to simulate separate stems if we had them,
          # but for now we feed mix and let Stage B handle it (or separation if enabled).
@@ -263,8 +268,31 @@ def run_pipeline_on_audio(
         "notes": notes_pred,
         "stage_b_out": stage_b_out,
         "transcription": transcription_result,
-        "resolved_config": config # Stage B might warn but doesn't mutate much, we log what we passed
+        "resolved_config": config, # Stage B might warn but doesn't mutate much, we log what we passed
+        "reference_stems": extra_stems or {},
     }
+
+
+def _notes_to_frame_track(notes: List[Tuple[int, float, float]], sr: int, hop: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Render a frame-level F0 track (Hz) and voicing mask from note tuples."""
+
+    if not notes:
+        return np.array([], dtype=np.float32), np.array([], dtype=bool)
+
+    max_time = max(e for _, _, e in notes)
+    n_frames = int(np.ceil(max_time * sr / hop)) + 1
+    times = np.arange(n_frames) * hop / sr
+    f0 = np.zeros(n_frames, dtype=np.float32)
+    voiced = np.zeros(n_frames, dtype=bool)
+
+    for midi, start, end in notes:
+        mask = (times >= start) & (times < end)
+        if not np.any(mask):
+            continue
+        f0[mask] = midi_to_freq(midi)
+        voiced[mask] = True
+
+    return f0, voiced
 
 class BenchmarkSuite:
     def __init__(self, output_dir: str):
@@ -477,7 +505,13 @@ class BenchmarkSuite:
         config.stage_b.separation['disable_in_benchmarks'] = False
         config.stage_b.separation['model'] = config.stage_b.separation.get('model', 'htdemucs_ft')
 
-        res = run_pipeline_on_audio(mix, sr, config, AudioType.POLYPHONIC_DOMINANT)
+        res = run_pipeline_on_audio(
+            mix,
+            sr,
+            config,
+            AudioType.POLYPHONIC_DOMINANT,
+            extra_stems=gt_stems,
+        )
 
         m = self._save_run("L2", "melody_plus_bass_synthetic_sep", res, gt_melody, gt_stems)
 
@@ -602,7 +636,18 @@ class BenchmarkSuite:
         latest_path = os.path.join("results", "benchmark_latest.json")
 
         # CSV
-        header = ["level", "name", "note_f1", "onset_mae_ms", "predicted_count", "gt_count"]
+        header = [
+            "level",
+            "name",
+            "note_f1",
+            "onset_mae_ms",
+            "predicted_count",
+            "gt_count",
+            "voicing_f1",
+            "octave_error_rate",
+            "per_section_note_f1",
+            "stem_si_sdr",
+        ]
         with open(summary_path, "w") as f:
             f.write(",".join(header) + "\n")
             for r in self.results:

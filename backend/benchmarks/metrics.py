@@ -26,7 +26,7 @@ environment.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 import numpy as np
 
 
@@ -94,6 +94,15 @@ def voicing_precision_recall(pred_hz: np.ndarray, gt_hz: np.ndarray) -> Tuple[fl
     precision = tp / float(tp + fp) if (tp + fp) > 0 else float('nan')
     recall = tp / float(tp + fn) if (tp + fn) > 0 else float('nan')
     return precision, recall
+
+
+def voicing_f1_score(pred_hz: np.ndarray, gt_hz: np.ndarray) -> float:
+    """Compute F1 score for voiced/unvoiced detection."""
+
+    precision, recall = voicing_precision_recall(pred_hz, gt_hz)
+    if np.isnan(precision) or np.isnan(recall) or (precision + recall) == 0:
+        return float("nan")
+    return float(2 * precision * recall / (precision + recall))
 
 
 def note_f1(pred_notes: List[Tuple[int, float, float]], gt_notes: List[Tuple[int, float, float]],
