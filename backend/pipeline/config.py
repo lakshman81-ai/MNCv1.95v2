@@ -1,6 +1,8 @@
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
+from backend.pipeline.poly_dominant_plan import L2_POLY_DOMINANT_PLAN
+
 
 # ------------------------------------------------------------
 # Stage A Config (Signal Conditioning)
@@ -117,6 +119,7 @@ class StageBConfig:
                     "mdx23": True,
                     "synthetic_mixes": True,
                 },
+                "l2_poly_dominant_plan": L2_POLY_DOMINANT_PLAN.as_dict(),
             },
             # Allow benchmarks to keep separation enabled; set True to disable
             # automatically for offline CI.
