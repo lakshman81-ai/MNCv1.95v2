@@ -92,6 +92,8 @@ def _segment_monophonic(
     gap_tolerance_s: float,
     semitone_stability: float = 0.60,
     min_rms: float = 0.01,
+    start_thr: Optional[float] = None,
+    stop_thr: Optional[float] = None,
 ) -> List[Tuple[int, int]]:
     """
     Segment monophonic FramePitch into (start_idx, end_idx) segments.
@@ -115,7 +117,19 @@ def _segment_monophonic(
     hop_s = float(np.median(dt)) if dt.size else 0.01
     hop_s = max(1e-4, hop_s)
 
-    active = (mids > 0) & (conf >= float(conf_thr)) & (rmss >= min_rms)
+    start_thr = float(conf_thr) if start_thr is None else float(start_thr)
+    stop_thr = float(conf_thr) if stop_thr is None else float(stop_thr)
+
+    hysteresis_mask = np.zeros_like(conf, dtype=bool)
+    state = False
+    for idx, c_val in enumerate(conf):
+        if c_val >= start_thr:
+            state = True
+        elif c_val <= stop_thr:
+            state = False
+        hysteresis_mask[idx] = state
+
+    active = (mids > 0) & hysteresis_mask & (rmss >= min_rms)
 
     segs: List[Tuple[int, int]] = []
     i = 0
@@ -228,6 +242,10 @@ def apply_theory(analysis_data: AnalysisData, config: Any = None) -> List[NoteEv
     min_note_dur_ms_poly = _get(config, "stage_c.min_note_duration_ms_poly", None)
     gap_tolerance_s = float(_get(config, "stage_c.gap_tolerance_s", 0.03))
 
+    hyst_conf = _get(config, "stage_c.confidence_hysteresis", {}) or {}
+    start_thr = float(hyst_conf.get("start", conf_thr))
+    stop_thr = float(hyst_conf.get("stop", conf_thr))
+
     # Derive semitone stability from configuration.  The config may specify
     # stage_c.pitch_tolerance_cents (e.g. 50), which we convert to a semitone
     # stability factor.  This factor is used to determine how many semitones
@@ -293,7 +311,9 @@ def apply_theory(analysis_data: AnalysisData, config: Any = None) -> List[NoteEv
             min_note_dur_s=voice_min_dur_s,
             gap_tolerance_s=gap_tolerance_s,
             semitone_stability=semitone_stability,
-            min_rms=min_rms
+            min_rms=min_rms,
+            start_thr=start_thr,
+            stop_thr=stop_thr,
         )
 
         # hop estimate for end time
@@ -371,11 +391,25 @@ def quantize_notes(
     analysis: Optional[AnalysisData] = analysis_data
 
     bpm_source = None
+    beats = []
     if analysis is not None:
         bpm_source = _get(analysis, "meta.tempo_bpm", None)
+        beats = _get(analysis, "meta.beats", []) or getattr(analysis, "beats", [])
+
+    soft_snap = False
+    if (bpm_source is None or bpm_source <= 0) and beats:
+        try:
+            intervals = np.diff(np.asarray(beats, dtype=np.float64))
+            if intervals.size:
+                med = float(np.median(intervals))
+                if med > 1e-3:
+                    bpm_source = 60.0 / med
+        except Exception:
+            bpm_source = None
 
     if bpm_source is None:
         bpm_source = tempo_bpm
+        soft_snap = True
 
     bpm = float(bpm_source) if bpm_source and bpm_source > 0 else 120.0
     sec_per_beat = 60.0 / bpm
@@ -392,9 +426,16 @@ def quantize_notes(
         denom = 16
     denom = max(1, denom)
 
+    # Adapt grid to tempo to avoid overly fine snapping at slow BPM
+    if bpm < 80.0:
+        denom = max(denom, 8)
+    elif bpm > 180.0:
+        denom = max(denom, 16)
+
     step_beats = 4.0 / float(denom)  # in 4/4, quarter note = 1 beat
     step_sec = sec_per_beat * step_beats
     step_sec = max(1e-4, step_sec)
+    snap_tolerance = max(0.03, step_sec * 0.35) if soft_snap else 0.0
 
     beats_per_measure = 4
     if analysis is not None:
@@ -412,6 +453,12 @@ def quantize_notes(
 
         qs = round(s / step_sec) * step_sec
         qe = round(e / step_sec) * step_sec
+
+        if soft_snap:
+            if abs(qs - s) > snap_tolerance:
+                qs = s
+            if abs(qe - e) > snap_tolerance:
+                qe = e
 
         if qe <= qs:
             qe = qs + max(int(min_steps), 1) * step_sec

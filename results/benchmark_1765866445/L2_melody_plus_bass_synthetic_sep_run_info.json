@@ -1,0 +1,482 @@
+{
+  "detectors_ran": [
+    "swiftf0",
+    "yin",
+    "sacf",
+    "cqt"
+  ],
+  "diagnostics": {
+    "polyphonic_context": true,
+    "detectors_initialized": [
+      "swiftf0",
+      "yin",
+      "sacf",
+      "cqt"
+    ],
+    "separation": {
+      "requested": true,
+      "synthetic_requested": false,
+      "mode": "preseparated",
+      "synthetic_ran": false,
+      "htdemucs_ran": false,
+      "fallback": false
+    },
+    "harmonic_masking": {
+      "enabled": true,
+      "applied": false,
+      "mask_width": 0.02,
+      "n_harmonics": 12
+    },
+    "iss": {
+      "enabled": true,
+      "layers_found": 1,
+      "max_layers": 8
+    },
+    "skyline_mode": "skyline_top_voice",
+    "voice_tracking": {
+      "max_alt_voices": 4,
+      "max_jump_cents": 150.0
+    },
+    "tracker_fusion": {
+      "strategy": "confidence_vote",
+      "harmonic_gate": true
+    },
+    "post_filters": {
+      "adaptive_median": true,
+      "harmonic_salience": true,
+      "octave_correction": true
+    }
+  },
+  "config": {
+    "stage_a": {
+      "target_sample_rate": 44100,
+      "channel_handling": "mono_sum",
+      "dc_offset_removal": true,
+      "transient_pre_emphasis": {
+        "enabled": true,
+        "alpha": 0.97
+      },
+      "high_pass_filter_cutoff": {
+        "value": 55.0
+      },
+      "high_pass_filter_order": {
+        "value": 4
+      },
+      "silence_trimming": {
+        "enabled": true,
+        "top_db": 50
+      },
+      "loudness_normalization": {
+        "enabled": true,
+        "target_lufs": -23.0
+      },
+      "peak_limiter": {
+        "enabled": false,
+        "mode": "soft",
+        "ceiling_db": -1.0
+      },
+      "noise_floor_estimation": {
+        "percentile": 30
+      },
+      "bpm_detection": {
+        "enabled": true,
+        "max_duration_s": 90.0,
+        "target_sr": 16000,
+        "hop_length": 256,
+        "n_fft": 1024
+      }
+    },
+    "stage_b": {
+      "separation": {
+        "enabled": true,
+        "model": "htdemucs_ft",
+        "checkpoint_path": null,
+        "mdx23_arch": "mdx23c",
+        "synthetic_model": false,
+        "overlap": 0.35,
+        "shifts": 2,
+        "harmonic_masking": {
+          "enabled": true,
+          "mask_width": 0.02,
+          "n_harmonics": 12
+        },
+        "stem_normalization": {
+          "enabled": true,
+          "target_lufs": -18.0,
+          "match_mix_lufs": true,
+          "epsilon_rms": 1e-05
+        },
+        "training": {
+          "multi_res_stft": {
+            "fft_sizes": [
+              1024,
+              2048,
+              4096
+            ],
+            "hop_sizes": [
+              256,
+              512,
+              1024
+            ],
+            "win_lengths": [
+              1024,
+              2048,
+              4096
+            ],
+            "weights": [
+              0.5,
+              0.35,
+              0.15
+            ]
+          },
+          "phase_sensitive_loss": {
+            "enabled": true,
+            "weight": 0.3
+          },
+          "si_sdr": {
+            "enabled": true,
+            "weight": 1.0
+          },
+          "datasets": {
+            "slakh": true,
+            "musdb_hq": true,
+            "moisesdb": true,
+            "mdx23": true,
+            "synthetic_mixes": true
+          },
+          "l2_poly_dominant_plan": {
+            "objectives": [
+              "Improve melody retention under bass masking via bass-forward training data and counterpoint coverage.",
+              "Increase robustness of separation and pitch models to extreme pitch/formant shifts, distractor stems, and diverse rooms.",
+              "Validate gains on the L2 benchmark before cascading to upper ladder levels."
+            ],
+            "dataset_curation": {
+              "bass_forward_corpora": [
+                "Prioritize Jamendo solos/duets with verified bass stems and metadata (key/tempo, LUFS, instrument tags).",
+                "Use MedleyDB tracks with isolated bass DI/mics and keep stem loudness for sampling.",
+                "Pull RWC-Pop songs flagged for pronounced bass lines.",
+                "Use class-balanced Slakh mixtures filtered for bass amplitude and crest factor."
+              ],
+              "duet_focus": [
+                "Build a melody+bass subset by pairing exposed vocal/lead stems with bass from the above corpora.",
+                "Include real duets and semi-stem versions where accompaniment is suppressed via separation."
+              ]
+            },
+            "synthetic_counterpoint": {
+              "intervals": [
+                "3rd",
+                "6th",
+                "10th"
+              ],
+              "entrances": "staggered counter-melody entrances with rhythm offsets",
+              "rhythm_offsets": "quantized 1/8 or 1/16 offsets",
+              "bass_timbres": [
+                "electric_picked",
+                "electric_fingered",
+                "synth_saw",
+                "synth_square",
+                "synth_fm",
+                "acoustic"
+              ],
+              "lead_timbres": [
+                "sine",
+                "woodwind",
+                "strings",
+                "voice_like_formants"
+              ],
+              "render_constraints": {
+                "tempo_bpm": "70-150",
+                "quantization": "enforce musical subdivisions"
+              }
+            },
+            "quality_filters": {
+              "lufs_min_db": -32,
+              "max_crest_factor_db": 18,
+              "synthetic_tempo_bpm": [
+                70,
+                150
+              ],
+              "quantize_offsets": true
+            },
+            "augmentation_chain": [
+              {
+                "name": "time_stretch",
+                "description": "Formant-preserving stretch (0.7-1.3x general, 0.5-1.5x for synthetic renders).",
+                "parameters": {
+                  "range": [
+                    0.7,
+                    1.3
+                  ],
+                  "synthetic_range": [
+                    0.5,
+                    1.5
+                  ]
+                }
+              },
+              {
+                "name": "pitch_shift",
+                "description": "Random \u00b112 semitones; formant correction on leads, optional drift on bass; include octave drops with light saturation.",
+                "parameters": {
+                  "semitones": 12,
+                  "bass_octave_drop_db": -12
+                }
+              },
+              {
+                "name": "coloration",
+                "description": "Saturation/EQ to mimic DI + amp coloration before mixing.",
+                "parameters": {
+                  "apply_to": [
+                    "bass",
+                    "lead"
+                  ]
+                }
+              },
+              {
+                "name": "snr_mixing",
+                "description": "Mix melody vs bass vs distractors at {+12, +6, 0, -6, -12} dB SNR with randomized phase alignment.",
+                "parameters": {
+                  "snr_steps_db": [
+                    12,
+                    6,
+                    0,
+                    -6,
+                    -12
+                  ],
+                  "phase_randomization": true
+                }
+              },
+              {
+                "name": "reverb_room",
+                "description": "Convolve with small-room IRs and plate/club tails; vary pre-delay and wet mix; include early-reflection-only variants.",
+                "parameters": {
+                  "pre_delay_ms": [
+                    0,
+                    40
+                  ],
+                  "wet_mix_percent": [
+                    5,
+                    30
+                  ]
+                }
+              },
+              {
+                "name": "logging",
+                "description": "Record applied parameters per sample (pitch, stretch, SNR, IR, wet mix) for curriculum auditing.",
+                "parameters": {}
+              }
+            ],
+            "curriculum": [
+              {
+                "name": "Phase 1: Clean stems",
+                "epochs": "0-2",
+                "focus": "Train on unaugmented duet/counterpoint stems; freeze augmentation RNG for reproducibility.",
+                "notes": "Stabilize pitch tracking and separation masks before heavy effects."
+              },
+              {
+                "name": "Phase 2: Controlled mixtures",
+                "epochs": "3-6",
+                "focus": "Introduce SNR ladder with one distractor and mild pitch/time shifts.",
+                "notes": "Monitor pitch F1 and onset MAE on held-out clean duets."
+              },
+              {
+                "name": "Phase 3: Full augmentations",
+                "epochs": "7+",
+                "focus": "Enable wide-range shifts, multi-distractor mixes, and reverb variants with 30-40% clean quota.",
+                "notes": "Prevent overfitting to heavy effects by mixing in earlier-phase data."
+              }
+            ],
+            "retraining_tasks": {
+              "separation_model": {
+                "focus": "Fine-tune synthetic Demucs variant with higher LF weights and melody SI-SDR preservation.",
+                "regularization": "Random low/high-pass perturbations to avoid timbre overfitting."
+              },
+              "pitch_model": {
+                "focus": "Retrain melody detector on augmented mixtures with octave-shifted bass and harmonic masking guidance.",
+                "negatives": "Include hard-negative distractors where bass overlaps lead range."
+              }
+            },
+            "benchmark": {
+              "level": "L2 poly-dominant",
+              "command": "python -m backend.benchmarks.benchmark_runner --level L2",
+              "metrics": "Track melody F1/onset MAE and detector coverage after each curriculum phase."
+            }
+          }
+        },
+        "disable_in_benchmarks": false
+      },
+      "confidence_voicing_threshold": 0.58,
+      "polyphonic_voicing_relaxation": 0.07,
+      "confidence_priority_floor": 0.5,
+      "pitch_disagreement_cents": 45.0,
+      "ensemble_weights": {
+        "swiftf0": 0.5,
+        "sacf": 0.3,
+        "cqt": 0.2,
+        "yin": 0.3,
+        "rmvpe": 0.5,
+        "crepe": 0.5,
+        "fcpe": 0.4,
+        "supertone": 0.4
+      },
+      "tracker_fusion": {
+        "strategy": "confidence_vote",
+        "harmonicity_gate": {
+          "enabled": true,
+          "threshold": 0.08,
+          "bandwidth": 0.04,
+          "max_harmonics": 4
+        },
+        "use_stability_fallback": true,
+        "stability_window": 5
+      },
+      "post_filters": {
+        "adaptive_median": {
+          "enabled": true,
+          "min_window": 3,
+          "max_window": 7,
+          "jitter_cents": 35.0
+        },
+        "harmonic_salience": {
+          "enabled": true,
+          "threshold": 0.06,
+          "bandwidth": 0.04,
+          "max_harmonics": 4
+        },
+        "octave_correction": {
+          "enabled": true,
+          "energy_margin": 1.1
+        }
+      },
+      "l2_tracker_pool": [
+        "rmvpe",
+        "fcpe",
+        "supertone"
+      ],
+      "polyphonic_peeling": {
+        "max_layers": 8,
+        "mask_width": 0.03,
+        "min_mask_width": 0.02,
+        "max_mask_width": 0.08,
+        "mask_growth": 1.1,
+        "mask_shrink": 0.9,
+        "harmonic_snr_stop_db": 3.0,
+        "residual_rms_stop_ratio": 0.08,
+        "residual_flatness_stop": 0.45,
+        "validator_cents_tolerance": 50.0,
+        "validator_agree_window": 5,
+        "validator_disagree_decay": 0.6,
+        "validator_min_agree_frames": 2,
+        "validator_min_disagree_frames": 2,
+        "max_harmonics": 12,
+        "force_on_mix": true
+      },
+      "voice_tracking": {
+        "max_alt_voices": 4,
+        "max_jump_cents": 150.0,
+        "hangover_frames": 6,
+        "smoothing": 0.35,
+        "confidence_bias": 5.0
+      },
+      "detectors": {
+        "rmvpe": {
+          "enabled": false,
+          "fmin": 50.0,
+          "fmax": 1200.0,
+          "hop_length": 160,
+          "silence_threshold": 0.04
+        },
+        "crepe": {
+          "enabled": false,
+          "model_capacity": "full",
+          "fmin": 190.0,
+          "fmax": 3500.0,
+          "use_viterbi": false
+        },
+        "swiftf0": {
+          "enabled": true
+        },
+        "yin": {
+          "enabled": true,
+          "fmin": 80.0,
+          "fmax": 1000.0,
+          "hop_length": 256,
+          "frame_length": 4096,
+          "threshold": 0.08
+        },
+        "sacf": {
+          "enabled": true
+        },
+        "cqt": {
+          "enabled": true
+        },
+        "fcpe": {
+          "enabled": false,
+          "fmin": 50.0,
+          "fmax": 2000.0,
+          "hop_length": 160
+        },
+        "supertone": {
+          "enabled": false,
+          "fmin": 40.0,
+          "fmax": 1800.0,
+          "hop_length": 160
+        }
+      }
+    },
+    "stage_c": {
+      "segmentation_method": {
+        "method": "hmm",
+        "states": [
+          "attack",
+          "sustain",
+          "silence"
+        ]
+      },
+      "min_note_duration_ms": 30.0,
+      "min_note_duration_ms_poly": 55.0,
+      "gap_tolerance_s": 0.06,
+      "frame_stability": {
+        "stable_frames_required": 2
+      },
+      "pitch_tolerance_cents": 50.0,
+      "confidence_hysteresis": {
+        "start": 0.6,
+        "stop": 0.4
+      },
+      "gap_filling": {
+        "max_gap_ms": 100.0
+      },
+      "polyphonic_confidence": {
+        "melody": 0.35,
+        "accompaniment": 0.48
+      },
+      "velocity_map": {
+        "min_db": -40.0,
+        "max_db": -4.0,
+        "min_vel": 20.0,
+        "max_vel": 105.0
+      },
+      "polyphony_filter": {
+        "mode": "skyline_top_voice"
+      }
+    },
+    "stage_d": {
+      "divisions_per_quarter": 24,
+      "staff_split_point": {
+        "pitch": 60
+      },
+      "staccato_marking": {
+        "threshold_beats": 0.25
+      },
+      "glissando_threshold_general": {
+        "enabled": false,
+        "min_semitones": 2.0,
+        "max_time_ms": 500.0
+      },
+      "glissando_handling_piano": {
+        "enabled": false
+      }
+    },
+    "instrument_profiles": []
+  }
+}

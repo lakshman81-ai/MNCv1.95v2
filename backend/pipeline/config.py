@@ -53,7 +53,14 @@ class StageAConfig:
 
     # BPM / beat grid detection
     bpm_detection: Dict[str, Any] = field(
-        default_factory=lambda: {"enabled": True}
+        default_factory=lambda: {
+            "enabled": True,
+            # Analyze a light, downsampled excerpt to reduce instability
+            "max_duration_s": 90.0,
+            "target_sr": 16000,
+            "hop_length": 256,
+            "n_fft": 1024,
+        }
     )
 
 
@@ -223,7 +230,7 @@ class StageBConfig:
         default_factory=lambda: {
             "max_alt_voices": 4,
             "max_jump_cents": 150.0,
-            "hangover_frames": 2,
+            "hangover_frames": 6,
             "smoothing": 0.35,
             "confidence_bias": 5.0,
         }
@@ -247,7 +254,14 @@ class StageBConfig:
                 "use_viterbi": False,
             },
             "swiftf0": {"enabled": True},
-            "yin": {"enabled": True},
+            "yin": {
+                "enabled": True,
+                "fmin": 80.0,
+                "fmax": 1000.0,
+                "hop_length": 256,
+                "frame_length": 4096,
+                "threshold": 0.08,
+            },
             "sacf": {"enabled": True},
             "cqt": {"enabled": True},
             "fcpe": {
@@ -287,6 +301,9 @@ class StageCConfig:
     # Polyphonic-specific minimum duration to suppress bass-induced flutter
     min_note_duration_ms_poly: float = 55.0
 
+    # Gap tolerance for bridging brief unvoiced dips (seconds)
+    gap_tolerance_s: float = 0.06
+
     # HMM frame stability (used in HMMProcessor)
     frame_stability: Dict[str, Any] = field(
         default_factory=lambda: {"stable_frames_required": 2}
@@ -294,6 +311,11 @@ class StageCConfig:
 
     # Pitch tolerance for merging (cents)
     pitch_tolerance_cents: float = 50.0
+
+    # Confidence hysteresis to avoid rapid toggling
+    confidence_hysteresis: Dict[str, float] = field(
+        default_factory=lambda: {"start": 0.6, "stop": 0.4}
+    )
 
     # Gap filling (legato) in ms
     gap_filling: Dict[str, Any] = field(

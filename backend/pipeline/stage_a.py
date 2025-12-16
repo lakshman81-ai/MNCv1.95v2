@@ -159,19 +159,57 @@ def _estimate_noise_floor(audio: np.ndarray, percentile: float = 30.0, hop_lengt
     return noise_rms, noise_db
 
 
-def _detect_tempo_and_beats(audio: np.ndarray, sr: int, enabled: bool) -> Tuple[Optional[float], List[float]]:
-    """Run a lightweight tempo/beat estimator if enabled and librosa is available."""
+def _detect_tempo_and_beats(audio: np.ndarray, sr: int, enabled: bool, bpm_conf: Dict[str, Any]) -> Tuple[Optional[float], List[float]]:
+    """Run a lightweight tempo/beat estimator if enabled and librosa is available.
+
+    The detector works on a downsampled excerpt to stabilize estimates and
+    gracefully falls back to ``None`` when the signal lacks rhythmic cues.
+    """
 
     if not enabled or librosa is None:
         return None, []
 
     try:
-        tempo_est, beat_frames = librosa.beat.beat_track(y=audio, sr=sr)
-        beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-        if tempo_est is None:
-            tempo_val = None
-        else:
-            tempo_val = float(np.asarray(tempo_est).reshape(-1)[0])
+        target_sr = int(bpm_conf.get("target_sr", 16000))
+        hop_length = int(bpm_conf.get("hop_length", 256))
+        n_fft = int(bpm_conf.get("n_fft", 1024))
+        max_duration = float(bpm_conf.get("max_duration_s", 90.0))
+
+        y = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if y.size == 0:
+            return None, []
+
+        # Trim to the first N seconds and downsample for speed/stability
+        max_samples = int(max_duration * sr)
+        y = y[:max_samples]
+        if sr != target_sr:
+            try:
+                y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
+                sr = target_sr
+            except Exception:
+                pass
+
+        if y.size == 0:
+            return None, []
+
+        tempo_est, beat_frames = librosa.beat.beat_track(
+            y=y, sr=sr, hop_length=hop_length, tightness=100, trim=False
+        )
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length).tolist()
+
+        tempo_val = float(np.asarray(tempo_est).reshape(-1)[0]) if tempo_est is not None else None
+
+        # Reject unreliable estimates (too few beats or high variance)
+        if not beat_times or len(beat_times) < 4:
+            return None, []
+
+        intervals = np.diff(beat_times)
+        if intervals.size:
+            median_int = float(np.median(intervals))
+            mad = float(np.median(np.abs(intervals - median_int)))
+            if mad > 0.05 * median_int:
+                return None, beat_times
+
         return tempo_val, beat_times
     except Exception as exc:  # pragma: no cover - defensive
         warnings.warn(f"Beat tracking failed: {exc}")
@@ -266,6 +304,7 @@ def load_and_preprocess(
         audio,
         sr=target_sr,
         enabled=a_conf.bpm_detection.get("enabled", False),
+        bpm_conf=a_conf.bpm_detection,
     )
 
     # 6. Populate Metadata & Output
@@ -290,7 +329,7 @@ def load_and_preprocess(
         processing_mode="monophonic", # Default assumption, detector may refine
         audio_type=AudioType.MONOPHONIC,
 
-        tempo_bpm=tempo_bpm if tempo_bpm is not None else 120.0,
+        tempo_bpm=tempo_bpm,
         beats=beat_times,
     )
 
