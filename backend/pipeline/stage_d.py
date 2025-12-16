@@ -53,8 +53,6 @@ def quantize_and_render(
     # --------------------------------------------------------
     # 1. Setup Score and Parts (treble + bass)
     # --------------------------------------------------------
-    s = stream.Score()
-
     part_treble = stream.Part()
     part_treble.id = "P1"
     part_bass = stream.Part()
@@ -181,26 +179,33 @@ def quantize_and_render(
         else:
             part_treble.insert(offset, m21_obj)
 
-    # Ensure we have at least one measure to avoid makeMeasures/makeRests failures
-    if len(events_sorted) == 0:
-        default_rest_len = ts_obj.barDuration.quarterLength if ts_obj.barDuration else 4.0
+    # Ensure each staff has something to quantize to measures
+    default_rest_len = ts_obj.barDuration.quarterLength if ts_obj.barDuration else 4.0
+    if len(part_treble.notesAndRests) == 0:
         part_treble.insert(0.0, note.Rest(quarterLength=default_rest_len))
+    if len(part_bass.notesAndRests) == 0:
         part_bass.insert(0.0, note.Rest(quarterLength=default_rest_len))
 
-    s.append(part_treble)
-    s.append(part_bass)
+    # Pad shorter staff to the longer staff's duration so measure spans match
+    treble_end = part_treble.highestTime if part_treble.highestTime else 0.0
+    bass_end = part_bass.highestTime if part_bass.highestTime else 0.0
+    target_end = max(treble_end, bass_end, default_rest_len)
+    if treble_end < target_end:
+        part_treble.insert(treble_end, note.Rest(quarterLength=target_end - treble_end))
+    if bass_end < target_end:
+        part_bass.insert(bass_end, note.Rest(quarterLength=target_end - bass_end))
 
-    # --------------------------------------------------------
-    # 4. Make Measures, Rests, Ties, and layout
-    # --------------------------------------------------------
-
-    try:
-        s_quant = s.makeMeasures(inPlace=False)
-        s_quant.makeRests(inPlace=True)
-        s_quant.makeTies(inPlace=True)
-    except Exception as e:
-        print(f"[Stage D] makeMeasures/makeRests/makeTies failed: {e}")
-        s_quant = s
+    # Quantize each part independently so measures exist on Parts
+    s_quant = stream.Score()
+    for part in (part_treble, part_bass):
+        try:
+            quantized_part = part.makeMeasures(inPlace=False)
+            quantized_part.makeRests(inPlace=True)
+            quantized_part.makeTies(inPlace=True)
+        except Exception as e:
+            print(f"[Stage D] makeMeasures/makeRests/makeTies failed for part {part.id}: {e}")
+            quantized_part = part
+        s_quant.append(quantized_part)
 
     # --------------------------------------------------------
     # 5. Export to MusicXML string and MIDI bytes
