@@ -433,6 +433,14 @@ def _init_detector(name: str, conf: Dict[str, Any], sr: int, hop_length: int) ->
             return RMVPEDetector(sr, hop_length, **kwargs)
         elif name == "crepe":
             return CREPEDetector(sr, hop_length, **kwargs)
+        elif name == "fcpe":
+            from .detectors import FCPEDetector
+
+            return FCPEDetector(sr, hop_length, **kwargs)
+        elif name == "supertone":
+            from .detectors import SupertoneDetector
+
+            return SupertoneDetector(sr, hop_length, **kwargs)
     except Exception as e:
         warnings.warn(f"Failed to init detector {name}: {e}")
         return None
@@ -443,6 +451,9 @@ def _ensemble_merge(
     weights: Dict[str, float],
     disagreement_cents: float = 70.0,
     priority_floor: float = 0.0,
+    harmonicity: Optional[Dict[str, np.ndarray]] = None,
+    harmonicity_threshold: float = 0.0,
+    stability_hint: Optional[Dict[str, float]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Merge multiple f0/conf tracks based on weights and disagreement.
@@ -487,9 +498,24 @@ def _ensemble_merge(
 
             # Priority floor mostly benefits SwiftF0 on synthetic tones
             eff_conf = max(c, priority_floor if name == "swiftf0" else c)
+            if harmonicity is not None:
+                gate_track = harmonicity.get(name)
+                if gate_track is not None and i < len(gate_track):
+                    h_val = float(gate_track[i])
+                    if harmonicity_threshold > 0.0 and h_val < harmonicity_threshold:
+                        continue
+                    eff_conf *= (1.0 + h_val)
             candidates.append((name, f, eff_conf, w))
 
         if not candidates:
+            if stability_hint:
+                stable_name, stable_score = max(stability_hint.items(), key=lambda kv: kv[1])
+                stable_track = aligned_results.get(stable_name)
+                if stable_track is not None and i < len(stable_track[0]):
+                    final_f0[i] = float(stable_track[0][i])
+                    final_conf[i] = float(stable_track[1][i]) * float(max(stable_score, 0.0))
+                    continue
+
             final_f0[i] = 0.0
             final_conf[i] = 0.0
             continue
@@ -513,6 +539,167 @@ def _ensemble_merge(
         final_conf[i] = best_conf * consensus
 
     return final_f0, final_conf
+
+
+def _harmonic_energy_score(
+    magnitude: np.ndarray,
+    freqs: np.ndarray,
+    target_hz: float,
+    bandwidth: float,
+    max_harmonics: int,
+) -> Tuple[float, float]:
+    """Return (harmonic_salience, fundamental_energy_ratio)."""
+
+    if target_hz <= 0.0 or not np.isfinite(target_hz):
+        return 0.0, 0.0
+
+    total_energy = float(np.sum(magnitude) + 1e-9)
+    if total_energy <= 0.0:
+        return 0.0, 0.0
+
+    bin_width = freqs[1] - freqs[0] if freqs.size > 1 else 1.0
+    accum = 0.0
+    base_energy = 0.0
+    for h in range(1, int(max_harmonics) + 1):
+        fh = target_hz * h
+        if fh >= freqs[-1]:
+            break
+        bw = max(bin_width, abs(bandwidth) * fh)
+        mask = (freqs >= fh - bw) & (freqs <= fh + bw)
+        energy = float(np.sum(magnitude[mask]))
+        if h == 1:
+            base_energy += energy
+        accum += energy / float(h)
+
+    salience = accum / total_energy
+    base_ratio = base_energy / total_energy
+    return salience, base_ratio
+
+
+def _harmonicity_trace(
+    audio: np.ndarray,
+    sr: int,
+    hop_length: int,
+    f0_track: np.ndarray,
+    bandwidth: float,
+    max_harmonics: int,
+    n_fft: int = 2048,
+) -> np.ndarray:
+    """Compute harmonic salience per frame for a given f0 track."""
+
+    frames = _frame_audio(np.asarray(audio, dtype=np.float32).reshape(-1), n_fft, hop_length)
+    if frames.size == 0:
+        return np.zeros_like(f0_track)
+
+    window = np.hanning(n_fft).astype(np.float32)
+    mag = np.abs(np.fft.rfft(frames * window, axis=1))
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / float(sr))
+
+    sal = np.zeros_like(f0_track, dtype=np.float32)
+    n_frames = min(len(f0_track), mag.shape[0])
+    for i in range(n_frames):
+        sal[i], _ = _harmonic_energy_score(mag[i], freqs, float(f0_track[i]), bandwidth, max_harmonics)
+    return sal
+
+
+def _track_stability(f0_track: np.ndarray, window: int = 5) -> float:
+    """Estimate track stability (higher = smoother)."""
+
+    voiced = np.asarray([f for f in f0_track if f > 0.0], dtype=np.float64)
+    if voiced.size < 2:
+        return 0.0
+
+    cents = np.abs(1200.0 * np.diff(np.log2(voiced + 1e-9)))
+    if cents.size == 0:
+        return 0.0
+    jitter = float(np.median(cents))
+    norm = float(max(window, 1))
+    return 1.0 / (1.0 + jitter / (norm * 10.0))
+
+
+def _apply_post_filters(
+    f0: np.ndarray,
+    conf: np.ndarray,
+    audio: np.ndarray,
+    sr: int,
+    hop_length: int,
+    post_cfg: Dict[str, Any],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Apply adaptive median smoothing, harmonic gating, and octave correction."""
+
+    if f0.size == 0:
+        return f0, conf
+
+    y = np.asarray(audio, dtype=np.float32).reshape(-1)
+    n_fft = int(post_cfg.get("n_fft", 2048))
+    frames = _frame_audio(y, n_fft, hop_length)
+    if frames.size == 0:
+        return f0, conf
+
+    window = np.hanning(n_fft).astype(np.float32)
+    mag = np.abs(np.fft.rfft(frames * window, axis=1))
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / float(sr))
+
+    adaptive_cfg = post_cfg.get("adaptive_median", {})
+    harmonic_cfg = post_cfg.get("harmonic_salience", {})
+    octave_cfg = post_cfg.get("octave_correction", {})
+
+    filtered_f0 = f0.copy()
+    filtered_conf = conf.copy()
+
+    # Adaptive median smoothing
+    if adaptive_cfg.get("enabled", False):
+        min_w = int(max(1, adaptive_cfg.get("min_window", 3)))
+        max_w = int(max(min_w, adaptive_cfg.get("max_window", 7)))
+        jitter_thr = float(adaptive_cfg.get("jitter_cents", 35.0))
+
+        padded = np.pad(filtered_f0, (max_w, max_w), mode="edge")
+        for i in range(len(filtered_f0)):
+            center = i + max_w
+            local = padded[center - min_w : center + min_w + 1]
+            jitter = np.abs(1200.0 * np.diff(np.log2(np.clip(local, 1e-6, None))))
+            win = min_w if (jitter.size == 0 or np.median(jitter) <= jitter_thr) else max_w
+            segment = padded[center - win : center + win + 1]
+            filtered_f0[i] = float(np.median(segment))
+
+    # Harmonic salience gating + octave correction
+    sal_thresh = float(harmonic_cfg.get("threshold", 0.0))
+    sal_bw = float(harmonic_cfg.get("bandwidth", 0.04))
+    sal_harm = int(harmonic_cfg.get("max_harmonics", 4))
+    energy_margin = float(octave_cfg.get("energy_margin", 1.0))
+
+    for i in range(min(len(filtered_f0), mag.shape[0])):
+        pitch = float(filtered_f0[i])
+        if pitch <= 0.0:
+            filtered_conf[i] = 0.0
+            continue
+
+        sal, base_ratio = _harmonic_energy_score(mag[i], freqs, pitch, sal_bw, sal_harm)
+        if harmonic_cfg.get("enabled", False):
+            if sal < sal_thresh:
+                filtered_conf[i] *= 0.5
+            else:
+                filtered_conf[i] *= min(1.0, 0.5 + sal)
+
+        if octave_cfg.get("enabled", False):
+            candidates = []
+            for mul in (0.5, 1.0, 2.0):
+                cand = pitch * mul
+                if cand <= 30.0 or cand >= float(sr) / 2.0:
+                    continue
+                c_sal, c_base = _harmonic_energy_score(mag[i], freqs, cand, sal_bw, sal_harm)
+                candidates.append((cand, c_sal, c_base))
+
+            if candidates:
+                best_cand, best_sal, best_base = max(candidates, key=lambda x: (x[1], x[2]))
+                # Prefer octave-adjusted pitch if the salience gain is meaningful
+                if best_cand != pitch and (
+                    best_sal > sal * energy_margin or best_base > base_ratio * energy_margin
+                ):
+                    filtered_f0[i] = best_cand
+                    filtered_conf[i] *= min(1.0, best_sal * 1.25)
+
+    return filtered_f0, filtered_conf
 
 def _is_polyphonic(audio_type: Any) -> bool:
     """Check if Stage A classified audio as polyphonic."""
@@ -770,6 +957,8 @@ def extract_features(
     polyphonic_context = _is_polyphonic(getattr(stage_a_out, "audio_type", None))
     skyline_mode = _resolve_polyphony_filter(config)
     tracker_cfg = getattr(b_conf, "voice_tracking", {}) or {}
+    tracker_fusion_cfg = getattr(b_conf, "tracker_fusion", {}) or {}
+    post_filter_cfg = getattr(b_conf, "post_filters", {}) or {}
 
     # Optional harmonic masking to create synthetic melody/bass stems for synthetic material
     augmented_stems = dict(resolved_stems)
@@ -805,6 +994,11 @@ def extract_features(
 
         stem_results: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
+        fusion_cfg = tracker_fusion_cfg
+        harmonic_gate_cfg = fusion_cfg.get("harmonicity_gate", {}) or {}
+        harmonic_map: Optional[Dict[str, np.ndarray]] = None
+        stability_hint: Optional[Dict[str, float]] = None
+
         # Run all initialized detectors on this stem
         for name, det in detectors.items():
             try:
@@ -814,6 +1008,24 @@ def extract_features(
             except Exception as e:
                 LOGGER.warning("Detector %s failed on stem %s: %s", name, stem_name, e)
 
+        if stem_results and harmonic_gate_cfg.get("enabled", False):
+            harmonic_map = {}
+            for name, (f0_track, _) in stem_results.items():
+                harmonic_map[name] = _harmonicity_trace(
+                    audio,
+                    sr,
+                    hop_length,
+                    f0_track,
+                    float(harmonic_gate_cfg.get("bandwidth", 0.04)),
+                    int(harmonic_gate_cfg.get("max_harmonics", 4)),
+                )
+
+        if stem_results and fusion_cfg.get("use_stability_fallback", False):
+            stability_hint = {
+                name: _track_stability(f0_track, int(fusion_cfg.get("stability_window", 5)))
+                for name, (f0_track, _) in stem_results.items()
+            }
+
         # Ensemble Merge with disagreement and SwiftF0 priority floor
         if stem_results:
             merged_f0, merged_conf = _ensemble_merge(
@@ -821,10 +1033,23 @@ def extract_features(
                 b_conf.ensemble_weights,
                 b_conf.pitch_disagreement_cents,
                 b_conf.confidence_priority_floor,
+                harmonicity=harmonic_map,
+                harmonicity_threshold=float(harmonic_gate_cfg.get("threshold", 0.0)),
+                stability_hint=stability_hint,
             )
         else:
             merged_f0 = np.zeros(1, dtype=np.float32)
             merged_conf = np.zeros(1, dtype=np.float32)
+
+        # Post filters: adaptive median + harmonic gating + octave correction
+        merged_f0, merged_conf = _apply_post_filters(
+            merged_f0,
+            merged_conf,
+            audio,
+            sr,
+            hop_length,
+            post_filter_cfg,
+        )
 
         # Polyphonic peeling (ISS) – optional and gated by config + context
         iss_layers: List[Tuple[np.ndarray, np.ndarray]] = []
@@ -980,6 +1205,15 @@ def extract_features(
         "voice_tracking": {
             "max_alt_voices": int(tracker_cfg.get("max_alt_voices", 4) if polyphonic_context else 0),
             "max_jump_cents": tracker_cfg.get("max_jump_cents", 150.0),
+        },
+        "tracker_fusion": {
+            "strategy": tracker_fusion_cfg.get("strategy", "confidence_vote"),
+            "harmonic_gate": bool((tracker_fusion_cfg.get("harmonicity_gate") or {}).get("enabled", False)),
+        },
+        "post_filters": {
+            "adaptive_median": bool((post_filter_cfg.get("adaptive_median") or {}).get("enabled", False)),
+            "harmonic_salience": bool((post_filter_cfg.get("harmonic_salience") or {}).get("enabled", False)),
+            "octave_correction": bool((post_filter_cfg.get("octave_correction") or {}).get("enabled", False)),
         },
     }
 

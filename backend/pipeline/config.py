@@ -146,7 +146,51 @@ class StageBConfig:
             "yin": 0.3,
             "rmvpe": 0.5,   # Dominant for vocals / cello profiles
             "crepe": 0.5,   # Dominant for violin / flute profiles
+            "fcpe": 0.4,    # FCPE and Supertone cover expressive L2 ladders
+            "supertone": 0.4,
         }
+    )
+
+    # Tracker fusion strategy (especially for L2 ladder examples)
+    tracker_fusion: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "strategy": "confidence_vote",  # "confidence_vote" | "harmonicity_gate"
+            "harmonicity_gate": {
+                "enabled": True,
+                "threshold": 0.08,
+                "bandwidth": 0.04,
+                "max_harmonics": 4,
+            },
+            "use_stability_fallback": True,
+            "stability_window": 5,
+        }
+    )
+
+    # Post-filtering after ensemble merge
+    post_filters: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "adaptive_median": {
+                "enabled": True,
+                "min_window": 3,
+                "max_window": 7,
+                "jitter_cents": 35.0,
+            },
+            "harmonic_salience": {
+                "enabled": True,
+                "threshold": 0.06,
+                "bandwidth": 0.04,
+                "max_harmonics": 4,
+            },
+            "octave_correction": {
+                "enabled": True,
+                "energy_margin": 1.1,
+            },
+        }
+    )
+
+    # Detector pools for L2 ladder tuning
+    l2_tracker_pool: List[str] = field(
+        default_factory=lambda: ["rmvpe", "fcpe", "supertone"]
     )
 
     # Polyphonic peeling (ISS) settings
@@ -203,6 +247,18 @@ class StageBConfig:
             "yin": {"enabled": True},
             "sacf": {"enabled": True},
             "cqt": {"enabled": True},
+            "fcpe": {
+                "enabled": False,
+                "fmin": 50.0,
+                "fmax": 2000.0,
+                "hop_length": 160,
+            },
+            "supertone": {
+                "enabled": False,
+                "fmin": 40.0,
+                "fmax": 1800.0,
+                "hop_length": 160,
+            },
         }
     )
 
