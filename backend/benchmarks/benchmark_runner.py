@@ -24,6 +24,7 @@ import tempfile
 import soundfile as sf
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import asdict
+import copy
 from music21 import tempo, chord
 
 from backend.pipeline.config import PipelineConfig, InstrumentProfile
@@ -265,6 +266,70 @@ def run_pipeline_on_audio(
         "stage_b_out": stage_b_out,
         "transcription": transcription_result,
         "resolved_config": config # Stage B might warn but doesn't mutate much, we log what we passed
+    }
+
+
+def benchmark_l2_trackers(
+    config: PipelineConfig,
+    tracker_pool: Optional[List[str]] = None,
+    waveform: str = "sine",
+) -> Dict[str, Any]:
+    """Benchmark individual trackers on the L2 expressive ladder example.
+
+    Returns per-tracker F1 along with tuned ensemble weights derived from the
+    scores (higher F1 -> higher weight). This keeps the tuning local to the L2
+    expressive use case without disturbing broader defaults.
+    """
+
+    score = generate_benchmark_example("happy_birthday_expressive")
+    bpm = 120.0
+    tempos = score.flat.getElementsByClass('MetronomeMark')
+    if tempos:
+        bpm = float(getattr(tempos[0], "number", bpm))
+    sec_per_beat = 60.0 / bpm
+
+    gt_notes: List[Tuple[int, float, float]] = []
+    synth_sequence: List[Tuple[int, float]] = []
+    for n in score.flat.notes:
+        if n.isRest:
+            continue
+        start = float(n.offset * sec_per_beat)
+        end = float((n.offset + n.quarterLength) * sec_per_beat)
+        gt_notes.append((int(n.pitch.midi), start, end))
+        synth_sequence.append((int(n.pitch.midi), end - start))
+
+    sr = config.stage_a.target_sample_rate
+    audio = midi_to_wav_synth(synth_sequence, sr=sr, waveform=waveform)
+
+    trackers = tracker_pool or getattr(config.stage_b, "l2_tracker_pool", []) or [
+        "rmvpe", "fcpe", "supertone"
+    ]
+
+    per_tracker_scores: Dict[str, float] = {}
+    for tracker in trackers:
+        cfg = copy.deepcopy(config)
+
+        # Enable only the target tracker to score it individually
+        for det_name, det_conf in cfg.stage_b.detectors.items():
+            det_conf["enabled"] = det_name == tracker
+
+        res = run_pipeline_on_audio(audio, sr, cfg, AudioType.MONOPHONIC)
+        pred_list = [(n.midi_note, n.start_sec, n.end_sec) for n in res["notes"]]
+        f1 = note_f1(pred_list, gt_notes, onset_tol=0.05)
+        per_tracker_scores[tracker] = f1
+
+    # Derive tuned ensemble weights (normalized F1)
+    tuned_weights = dict(config.stage_b.ensemble_weights)
+    norm = sum(max(score, 1e-4) for score in per_tracker_scores.values())
+    if norm > 0.0:
+        for name, score in per_tracker_scores.items():
+            tuned_weights[name] = max(score, 1e-4) / norm
+        config.stage_b.ensemble_weights.update(tuned_weights)
+
+    return {
+        "per_tracker_f1": per_tracker_scores,
+        "tuned_weights": tuned_weights,
+        "tracker_pool": trackers,
     }
 
 class BenchmarkSuite:

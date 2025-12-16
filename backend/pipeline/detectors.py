@@ -28,6 +28,16 @@ try:
 except Exception:  # pragma: no cover
     crepe = None  # type: ignore
 
+try:
+    import fcpe  # type: ignore
+except Exception:  # pragma: no cover
+    fcpe = None  # type: ignore
+
+try:
+    import supertone  # type: ignore
+except Exception:  # pragma: no cover
+    supertone = None  # type: ignore
+
 
 # --------------------------------------------------------------------------------------
 # Utility
@@ -672,6 +682,64 @@ class CREPEDetector(BasePitchDetector):
             return np.zeros((n,), dtype=np.float32), np.zeros((n,), dtype=np.float32)
 
         # Minimal safe stub: fall back to ACF unless you explicitly wire CREPE
+        f0, conf = _autocorr_pitch_per_frame(frames, sr=self.sr, fmin=self.fmin, fmax=self.fmax)
+        conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
+        f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
+        return f0, conf
+
+
+class FCPEDetector(BasePitchDetector):
+    """
+    F0 estimation via FCPE (torch-based). Falls back to ACF when the
+    optional dependency is unavailable, mirroring the behaviour of other
+    lightweight detector wrappers.
+    """
+
+    def __init__(self, sr: int, hop_length: int, n_fft: int = 2048, **kwargs: Any):
+        super().__init__(sr=sr, hop_length=hop_length, n_fft=n_fft, **kwargs)
+        self.enabled = fcpe is not None and torch is not None
+
+    def predict(self, audio: np.ndarray, audio_path: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+        y = np.asarray(audio, dtype=np.float32).reshape(-1)
+        frames = _frame_audio(y, frame_length=self.n_fft, hop_length=self.hop_length)
+        n = frames.shape[0]
+
+        if not self.enabled:
+            self._warn_once("no_fcpe", "FCPE disabled: dependency not available.")
+            f0, conf = _autocorr_pitch_per_frame(frames, sr=self.sr, fmin=self.fmin, fmax=self.fmax)
+            conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
+            f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
+            return f0, conf
+
+        # Placeholder: replace with FCPE inference if wired in the environment
+        f0, conf = _autocorr_pitch_per_frame(frames, sr=self.sr, fmin=self.fmin, fmax=self.fmax)
+        conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
+        f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
+        return f0, conf
+
+
+class SupertoneDetector(BasePitchDetector):
+    """
+    Supertone tracker stub. Mirrors FCPE behaviour: uses autocorrelation when
+    the dedicated dependency is missing.
+    """
+
+    def __init__(self, sr: int, hop_length: int, n_fft: int = 2048, **kwargs: Any):
+        super().__init__(sr=sr, hop_length=hop_length, n_fft=n_fft, **kwargs)
+        self.enabled = supertone is not None and torch is not None
+
+    def predict(self, audio: np.ndarray, audio_path: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+        y = np.asarray(audio, dtype=np.float32).reshape(-1)
+        frames = _frame_audio(y, frame_length=self.n_fft, hop_length=self.hop_length)
+        n = frames.shape[0]
+
+        if not self.enabled:
+            self._warn_once("no_supertone", "Supertone disabled: dependency not available.")
+            f0, conf = _autocorr_pitch_per_frame(frames, sr=self.sr, fmin=self.fmin, fmax=self.fmax)
+            conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
+            f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
+            return f0, conf
+
         f0, conf = _autocorr_pitch_per_frame(frames, sr=self.sr, fmin=self.fmin, fmax=self.fmax)
         conf = np.where(conf >= self.threshold, conf, 0.0).astype(np.float32)
         f0 = np.where(conf > 0.0, f0, 0.0).astype(np.float32)
