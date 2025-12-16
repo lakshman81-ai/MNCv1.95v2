@@ -158,3 +158,26 @@ def onset_offset_mae(pred_notes: List[Tuple[int, float, float]], gt_notes: List[
     if not errors_start:
         return float('nan'), float('nan')
     return float(np.mean(errors_start)), float(np.mean(errors_end))
+
+
+def si_sdr(pred: np.ndarray, target: np.ndarray, eps: float = 1e-8) -> float:
+    """Scale-invariant SDR in linear domain."""
+
+    pred = np.asarray(pred, dtype=np.float64).reshape(-1)
+    target = np.asarray(target, dtype=np.float64).reshape(-1)
+
+    n = min(len(pred), len(target))
+    if n == 0:
+        return float('nan')
+    pred = pred[:n]
+    target = target[:n]
+
+    target_energy = np.sum(target ** 2) + eps
+    if target_energy <= eps:
+        return float('nan')
+
+    scale = np.sum(pred * target) / target_energy
+    projection = scale * target
+    noise = pred - projection
+
+    return float(10 * np.log10((np.sum(projection ** 2) + eps) / (np.sum(noise ** 2) + eps)))

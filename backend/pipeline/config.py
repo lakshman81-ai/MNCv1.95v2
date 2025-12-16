@@ -61,23 +61,66 @@ class StageAConfig:
 
 @dataclass
 class StageBConfig:
-    # Source separation (HTDemucs)
+    # Source separation (HTDemucs / MDX)
     separation: Dict[str, Any] = field(
         default_factory=lambda: {
             "enabled": True,
-            "model": "htdemucs",
+            # Preferred modern checkpoint (Demucs v4 Hybrid Transformer fine-tune)
+            # Available names depend on the installed demucs package. The loader
+            # will gracefully fall back to the legacy "htdemucs" weights if the
+            # requested model cannot be resolved.
+            "model": "htdemucs_ft",
+            # Optionally override with an explicit checkpoint (local path)
+            "checkpoint_path": None,
+            # Lightweight MDX23C head (if packaged with demucs). When set, we
+            # try to resolve the MDX23C architecture before falling back.
+            "mdx23_arch": "mdx23c",
             # If True, prefer the synthetic model fine-tuned on procedurally
             # generated L2 sine/saw/square/FM stems. Falls back to the
             # configured "model" when unavailable.
             "synthetic_model": False,
-            "overlap": 0.25,  # Demucs overlap
-            "shifts": 1,      # number of shifts (test-time augmentation)
+            "overlap": 0.35,  # Demucs overlap (slightly higher for HT v4)
+            "shifts": 2,      # number of shifts (test-time augmentation)
             # Optional harmonic masking guided by a fast F0 prior
             "harmonic_masking": {
                 "enabled": True,
                 "mask_width": 0.02,
                 "n_harmonics": 12,
             },
+            # Stabilize downstream F0 models with per-stem loudness matching
+            "stem_normalization": {
+                "enabled": True,
+                "target_lufs": -18.0,
+                "match_mix_lufs": True,
+                "epsilon_rms": 1e-5,
+            },
+            # Fine-tuning recipe hint: multi-res STFT + phase-sensitive + SI-SDR
+            "training": {
+                "multi_res_stft": {
+                    "fft_sizes": [1024, 2048, 4096],
+                    "hop_sizes": [256, 512, 1024],
+                    "win_lengths": [1024, 2048, 4096],
+                    "weights": [0.5, 0.35, 0.15],
+                },
+                "phase_sensitive_loss": {
+                    "enabled": True,
+                    "weight": 0.3,
+                },
+                "si_sdr": {
+                    "enabled": True,
+                    "weight": 1.0,
+                },
+                "datasets": {
+                    "slakh": True,
+                    "musdb_hq": True,
+                    "moisesdb": True,
+                    "mdx23": True,
+                    "synthetic_mixes": True,
+                },
+            },
+            # Allow benchmarks to keep separation enabled; set True to disable
+            # automatically for offline CI.
+            "disable_in_benchmarks": False,
         }
     )
 

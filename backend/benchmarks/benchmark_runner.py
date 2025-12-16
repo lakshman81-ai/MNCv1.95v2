@@ -34,7 +34,7 @@ from backend.pipeline.stage_a import load_and_preprocess
 from backend.pipeline.stage_b import extract_features
 from backend.pipeline.stage_c import apply_theory, quantize_notes
 from backend.pipeline.stage_d import quantize_and_render
-from backend.benchmarks.metrics import note_f1, onset_offset_mae
+from backend.benchmarks.metrics import note_f1, onset_offset_mae, si_sdr
 from backend.benchmarks.run_real_songs import run_song as run_real_song
 from backend.benchmarks.ladder.generators import generate_benchmark_example
 from backend.benchmarks.ladder.synth import midi_to_wav_synth
@@ -217,10 +217,9 @@ def run_pipeline_on_audio(
 ) -> Dict[str, Any]:
     """Run full pipeline on raw audio array."""
 
-    # Synthetic benchmarks do not require source separation and the default Demucs
-    # model download can fail in offline environments. Disable separation here to
-    # keep the ladder runnable without external network access.
-    if config.stage_b.separation.get("enabled", False):
+    # Synthetic benchmarks may run in offline environments; allow opting out of
+    # Demucs downloads while keeping separation enabled when explicitly requested.
+    if config.stage_b.separation.get("disable_in_benchmarks", False):
         config.stage_b.separation["enabled"] = False
 
     # 1. Stage A (Manual construction since we have raw audio, but let's simulate Stage A output)
@@ -319,7 +318,7 @@ class BenchmarkSuite:
 
         return [merged[k] for k in sorted(merged.keys())]
 
-    def _save_run(self, level: str, name: str, res: Dict[str, Any], gt: List[Tuple[int, float, float]]):
+    def _save_run(self, level: str, name: str, res: Dict[str, Any], gt: List[Tuple[int, float, float]], gt_stems: Optional[Dict[str, np.ndarray]] = None):
         """Save artifacts for a single run."""
         pred_notes = res['notes']
         pred_list = [(n.midi_note, n.start_sec, n.end_sec) for n in pred_notes]
@@ -342,6 +341,20 @@ class BenchmarkSuite:
             "predicted_count": len(pred_list),
             "gt_count": len(gt)
         }
+
+        # Optional separation metrics (SI-SDR) when ground-truth stems are provided
+        separation_metrics: Dict[str, float] = {}
+        if gt_stems and hasattr(res.get("stage_b_out"), "stems"):
+            predicted_stems = getattr(res["stage_b_out"], "stems", {}) or {}
+            for stem_name, target_audio in gt_stems.items():
+                pred_stem = predicted_stems.get(stem_name)
+                if pred_stem is None or target_audio is None:
+                    continue
+                score = si_sdr(pred_stem.audio, target_audio)
+                if not np.isnan(score):
+                    separation_metrics[stem_name] = score
+        if separation_metrics:
+            metrics["separation_sisdr"] = separation_metrics
         self.results.append(metrics)
 
         # Save JSONs
@@ -457,15 +470,16 @@ class BenchmarkSuite:
 
         mix = melody + bass
         gt_melody = [(72, 0.0, 0.5), (76, 0.5, 1.0), (79, 1.0, 1.5)]
+        gt_stems = {"vocals": melody, "bass": bass}
 
         config = PipelineConfig()
-        config.stage_b.separation['enabled'] = False
-        # Enable separation if possible, or assume dominant melody extraction works
-        # config.stage_b.separation['enabled'] = True
+        config.stage_b.separation['enabled'] = True
+        config.stage_b.separation['disable_in_benchmarks'] = False
+        config.stage_b.separation['model'] = config.stage_b.separation.get('model', 'htdemucs_ft')
 
         res = run_pipeline_on_audio(mix, sr, config, AudioType.POLYPHONIC_DOMINANT)
 
-        m = self._save_run("L2", "melody_plus_bass_synthetic_sep", res, gt_melody)
+        m = self._save_run("L2", "melody_plus_bass_synthetic_sep", res, gt_melody, gt_stems)
 
         # We expect it to find the melody (highest energy/frequency?)
         # Standard YIN might track bass or jump. RMVPE/Swift should track melody.
@@ -484,7 +498,7 @@ class BenchmarkSuite:
         exp_config = self._poly_config(use_harmonic_masking=True)
         self._enable_high_capacity_frontend(exp_config)
         exp_res = run_pipeline_on_audio(mix, sr, exp_config, AudioType.POLYPHONIC_DOMINANT)
-        m_exp = self._save_run("L2", "melody_plus_bass_crepe_rmvpe", exp_res, gt_melody)
+        m_exp = self._save_run("L2", "melody_plus_bass_crepe_rmvpe", exp_res, gt_melody, gt_stems)
         logger.info(f"L2 CREPE/RMVPE Complete. F1: {m_exp['note_f1']}")
 
     def run_L3_full_poly(self):
