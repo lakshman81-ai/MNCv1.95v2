@@ -928,8 +928,21 @@ def extract_features(
         config = PipelineConfig()
 
     b_conf = config.stage_b
+    c_conf = getattr(config, "stage_c", None)
     sr = stage_a_out.meta.sample_rate
     hop_length = stage_a_out.meta.hop_length
+
+    # Align RMS gating with Stage C velocity mapping (prevents note spam on fades)
+    rms_gate = 0.0
+    try:
+        if c_conf is not None:
+            min_db = float(getattr(c_conf, "velocity_map", {}).get("min_db", -40.0))
+        else:
+            min_db = -40.0
+        gate_db = min_db - 5.0
+        rms_gate = 10 ** (gate_db / 20.0)
+    except Exception:
+        rms_gate = 0.0
 
     # Separation routing happens before harmonic masking/ISS so downstream
     # detectors always see the requested stem layout.
@@ -1111,6 +1124,18 @@ def extract_features(
         padded_layers = [(_pad_to(f0, max_frames), _pad_to(conf, max_frames)) for f0, conf in layer_arrays]
         padded_rms = _pad_to(rms_vals, max_frames)
 
+        # Short median smoothing to reduce jitter-driven splits
+        for idx, (f0_arr, conf_arr) in enumerate(padded_layers):
+            if len(f0_arr) < 3:
+                continue
+            pad = 2
+            padded = np.pad(f0_arr, (pad, pad), mode="edge")
+            smoothed = np.zeros_like(f0_arr)
+            for i in range(len(f0_arr)):
+                segment = padded[i : i + 2 * pad + 1]
+                smoothed[i] = float(np.median(segment))
+            padded_layers[idx] = (smoothed, conf_arr)
+
         timeline: List[FramePitch] = []
         max_alt_voices = int(tracker_cfg.get("max_alt_voices", 4) if polyphonic_context else 0)
         tracker = MultiVoiceTracker(
@@ -1126,11 +1151,23 @@ def extract_features(
 
         for i in range(max_frames):
             candidates: List[Tuple[float, float]] = []
+            raw_candidates: List[Tuple[float, float]] = []
             for f0_arr, conf_arr in padded_layers:
                 f = float(f0_arr[i]) if i < len(f0_arr) else 0.0
                 c = float(conf_arr[i]) if i < len(conf_arr) else 0.0
-                if f > 0.0 and c >= voicing_thr:
-                    candidates.append((f, c))
+                if f > 0.0 and c > 0.0:
+                    raw_candidates.append((f, c))
+                    if c >= voicing_thr:
+                        if rms_gate > 0.0 and (i < len(padded_rms)):
+                            if float(padded_rms[i]) < rms_gate:
+                                continue
+                        candidates.append((f, c))
+
+            if not candidates and raw_candidates:
+                best_f, best_c = max(raw_candidates, key=lambda x: x[1])
+                if best_c >= 0.6 * voicing_thr:
+                    if rms_gate <= 0.0 or float(padded_rms[i]) >= rms_gate:
+                        candidates.append((best_f, best_c))
 
             tracked_pitches, tracked_confs = tracker.step(candidates)
             for voice_idx in range(tracker.max_tracks):
@@ -1160,6 +1197,17 @@ def extract_features(
                     active_pitches=active,
                 )
             )
+
+        # Carry the final confident pitch through a short tail to avoid truncation
+        hop_s = float(hop_length) / float(sr)
+        tail_frames = int(max(1, round(0.30 / hop_s)))
+        last_idx = max((idx for idx, fp in enumerate(timeline) if fp.pitch_hz > 0.0), default=-1)
+        if last_idx >= 0:
+            last_pitch = timeline[last_idx].pitch_hz
+            last_conf = timeline[last_idx].confidence
+            for j in range(last_idx + 1, min(len(timeline), last_idx + tail_frames + 1)):
+                timeline[j].pitch_hz = last_pitch
+                timeline[j].confidence = last_conf
 
         stem_timelines[stem_name] = timeline
 

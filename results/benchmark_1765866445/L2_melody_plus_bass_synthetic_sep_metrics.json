@@ -1,0 +1,12 @@
+{
+  "level": "L2",
+  "name": "melody_plus_bass_synthetic_sep",
+  "note_f1": 0.6666666666666666,
+  "onset_mae_ms": 0.0,
+  "predicted_count": 6,
+  "gt_count": 3,
+  "separation_sisdr": {
+    "vocals": 119.057085816909,
+    "bass": 111.35387712350708
+  }
+}

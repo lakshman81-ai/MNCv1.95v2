@@ -1,0 +1,142 @@
+[
+  {
+    "level": "L1",
+    "name": "scale_c_maj",
+    "delta_note_f1": 0.0,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L1",
+      "name": "scale_c_maj",
+      "note_f1": 1.0,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 8,
+      "gt_count": 8
+    },
+    "current": {
+      "level": "L1",
+      "name": "scale_c_maj",
+      "note_f1": 1.0,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 8,
+      "gt_count": 8
+    }
+  },
+  {
+    "level": "L2",
+    "name": "melody_plus_bass_crepe_rmvpe",
+    "delta_note_f1": 0.0,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L2",
+      "name": "melody_plus_bass_crepe_rmvpe",
+      "note_f1": 0.8,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 2,
+      "gt_count": 3
+    },
+    "current": {
+      "level": "L2",
+      "name": "melody_plus_bass_crepe_rmvpe",
+      "note_f1": 0.8,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 2,
+      "gt_count": 3
+    }
+  },
+  {
+    "level": "L2",
+    "name": "melody_plus_bass_synthetic_sep",
+    "delta_note_f1": 0.06666666666666665,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L2",
+      "name": "melody_plus_bass_synthetic_sep",
+      "note_f1": 0.6,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 7,
+      "gt_count": 3,
+      "separation_sisdr": {
+        "vocals": 119.057085816909,
+        "bass": 111.35387712350708
+      }
+    },
+    "current": {
+      "level": "L2",
+      "name": "melody_plus_bass_synthetic_sep",
+      "note_f1": 0.6666666666666666,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 6,
+      "gt_count": 3,
+      "separation_sisdr": {
+        "vocals": 119.057085816909,
+        "bass": 111.35387712350708
+      }
+    }
+  },
+  {
+    "level": "L3",
+    "name": "old_macdonald_poly_full",
+    "delta_note_f1": 0.0,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L3",
+      "name": "old_macdonald_poly_full",
+      "note_f1": 0.6666666666666666,
+      "onset_mae_ms": 33.33333333333343,
+      "predicted_count": 12,
+      "gt_count": 12
+    },
+    "current": {
+      "level": "L3",
+      "name": "old_macdonald_poly_full",
+      "note_f1": 0.6666666666666666,
+      "onset_mae_ms": 33.33333333333343,
+      "predicted_count": 12,
+      "gt_count": 12
+    }
+  },
+  {
+    "level": "L4",
+    "name": "happy_birthday",
+    "delta_note_f1": 0.0,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L4",
+      "name": "happy_birthday",
+      "note_f1": 1.0,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 6,
+      "gt_count": 6
+    },
+    "current": {
+      "level": "L4",
+      "name": "happy_birthday",
+      "note_f1": 1.0,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 6,
+      "gt_count": 6
+    }
+  },
+  {
+    "level": "L4",
+    "name": "old_macdonald",
+    "delta_note_f1": 0.0,
+    "delta_onset_mae_ms": 0.0,
+    "previous": {
+      "level": "L4",
+      "name": "old_macdonald",
+      "note_f1": 0.923076923076923,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 6,
+      "gt_count": 7
+    },
+    "current": {
+      "level": "L4",
+      "name": "old_macdonald",
+      "note_f1": 0.923076923076923,
+      "onset_mae_ms": 0.0,
+      "predicted_count": 6,
+      "gt_count": 7
+    }
+  }
+]
