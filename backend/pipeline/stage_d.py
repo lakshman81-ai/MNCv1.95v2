@@ -83,16 +83,28 @@ def quantize_and_render(
     # 2. Prepare Events: group by staff + onset in beats
     # --------------------------------------------------------
     quarter_dur = 60.0 / float(bpm)
+    beats_per_measure = ts_obj.numerator * (4.0 / float(ts_obj.denominator)) if ts_obj.denominator else 4.0
 
     def get_event_beats(e: NoteEvent) -> Tuple[float, float]:
         dur_beats = getattr(e, "duration_beats", None)
         if dur_beats is None:
             dur_beats = (e.end_sec - e.start_sec) / quarter_dur
-        start_beats = getattr(e, "start_beats", None)
-        if start_beats is None:
-            start_beats = getattr(e, "beat", None)
-        if start_beats is None:
-            start_beats = e.start_sec / quarter_dur
+
+        start_beats: Optional[float] = getattr(e, "start_beats", None)
+        if start_beats is not None and np.isfinite(start_beats):
+            pass
+        else:
+            measure = getattr(e, "measure", None)
+            beat = getattr(e, "beat", None)
+            if (
+                measure is not None
+                and beat is not None
+                and np.isfinite(measure)
+                and np.isfinite(beat)
+            ):
+                start_beats = (float(measure) - 1.0) * beats_per_measure + (float(beat) - 1.0)
+            else:
+                start_beats = e.start_sec / quarter_dur
 
         return float(start_beats), float(dur_beats)
 
@@ -180,10 +192,12 @@ def quantize_and_render(
             part_treble.insert(offset, m21_obj)
 
     # Ensure each staff has something to quantize to measures
-    default_rest_len = ts_obj.barDuration.quarterLength if ts_obj.barDuration else 4.0
-    if len(part_treble.notesAndRests) == 0:
+    default_rest_len = beats_per_measure
+    has_treble_notes = any(not n.isRest for n in part_treble.recurse().notes)
+    has_bass_notes = any(not n.isRest for n in part_bass.recurse().notes)
+    if not has_treble_notes:
         part_treble.insert(0.0, note.Rest(quarterLength=default_rest_len))
-    if len(part_bass.notesAndRests) == 0:
+    if not has_bass_notes:
         part_bass.insert(0.0, note.Rest(quarterLength=default_rest_len))
 
     # Pad shorter staff to the longer staff's duration so measure spans match
